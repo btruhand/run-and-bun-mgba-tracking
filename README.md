@@ -1,0 +1,114 @@
+# Run & Bun kill tracker
+
+Tooling to keep a Google Sheets kill tracker (the `Rankings` tab of the "R&B kill sheet") up to date automatically while playing Pokémon Run & Bun in a hardcore Nuzlocke.
+
+The long-term goal is for mGBA to feed the sheet directly; see [DESIGN.md](DESIGN.md) for the full design. **What exists today is the sheet side only:** a refactored Apps Script project with a web app endpoint that accepts game events, plus tests for it. Nothing reads the emulator yet.
+
+## What's here
+
+```
+appsscript/
+  Sorter.js      onEdit handlers (manual buttons, row setup, sorting)
+  Rankings.js    shared helpers for the Rankings tab (used by onEdit and the web app)
+  WebApp.js      web app: receives events and applies them to the sheet
+  appsscript.json
+scripts/
+  gen-token.js   generates the shared secret
+  setup-clasp.js asks for the prod and dev script IDs and writes the two clasp files
+  deploy-dev.sh  pushes to the DEV sheet and (re)deploys the web app
+tests/sheet/
+  run.mjs        scenario tests against the dev web app
+fixtures/private/   your ROM / savestates (gitignored)
+```
+
+## The sheet
+
+`Rankings` rows 3–102 hold up to 100 Pokémon.
+
+| Column | Meaning |
+|--------|---------|
+| `E` | formula (Gemstones lookup on Total KC), never written by scripts |
+| `F` | Status (`Alive` / `Dead`) |
+| `H` / `I` / `J` | Nickname / Species / Encounter Location |
+| `K:S` | KC for Split 1–8 and E4 Split |
+| `T` | Total KC |
+| `W` | Add KO checkbox |
+| `Y` | hidden mon ID (`personality:otid`), written only by the web app |
+
+Right-hand panel (column `AA`): `AA2` Attempt, `AA4` Badges, `AA7` Advance Split, `AA9` Reset Run. **Badges is the current split**: a kill goes in column `K + Badges`.
+
+The table is sorted by Total KC (descending), then Status (Alive above Dead), over `D3:Y102`.
+
+### Apps Script refactor
+
+`Sorter.js` used to hold everything in one `onEdit`. The row logic now lives in `Rankings.js` (`initRow`, `blankRow`, `recomputeTotal`, `addKc`, `sortRankings`, …) so the manual buttons and the web app behave identically. Behavior changes from the original: the sort range widens from `D3:T102` to `D3:Y102` to carry the ID column, and Reset Run also clears that column and the web app's event log.
+
+Script writes don't trigger `onEdit`, which is why the web app calls the shared helpers itself.
+
+## Web app
+
+`WebApp.js` is deployed as a web app (runs as the deploying user, anonymous access) and is protected by a shared secret. It declares `@OnlyCurrentDoc`, so it only asks for access to the spreadsheet it is attached to.
+
+Every request is JSON containing `token`. `POST` bodies are sent as `text/plain` to avoid a CORS preflight.
+
+### Events
+
+```json
+{"token": "...", "events": [ ... ]}
+```
+
+Every event has `id` (unique; repeats are ignored), `run` (identifies the save/run), `playTime` (in-game play time in seconds) and `type`:
+
+| type | fields | effect |
+|------|--------|--------|
+| `catch` | `pid`, `species`, `nick`, `location` | add a row (status Alive, KC 0) in the first empty row |
+| `kill` | `pid`, `split` (1–9), `trainer`, `key` | +1 in that split's column |
+| `death` | `pid` | Status → `Dead` |
+| `evolve` | `pid`, `from`, `to` | change species in place, KC kept |
+| `trade` | `old_pid`, `pid`, `species`, `nick`, `location` | replace the row's mon in place, KC kept |
+| `split` | `badges` (0–8) | set Badges directly |
+| `sync` | `mons[]`, `defeated[]`, `badges`, `complete` | reconcile after a savestate / save load |
+
+`pid` is the personality value plus original-trainer ID (`"0xA1B2C3D4:0x1234ABCD"`), which stays the same through evolution and nickname changes. Rows move on every sort, so the sheet always finds a Pokémon by this ID.
+
+Responses: `{ok: true, results: [{id, status}]}` where status is `applied`, `duplicate`, `ignored` or `held` (event from a different run; press Reset Run to switch).
+
+### Event log and `sync`
+
+Every applied event is recorded in a hidden `_Events` tab together with how to undo it. Problems (unknown mon, full table, skipped undo) go to a hidden `_Issues` tab.
+
+`sync` handles loading savestates and older saves, where the game goes back in time but the sheet doesn't. It carries a snapshot of the game: the mons you have, which trainers are defeated, and the badge count. The sheet then:
+
+- undoes events with `playTime` later than the snapshot's,
+- keeps events that still match the game (e.g. a kill whose trainer is still defeated) and re-applies ones that match again,
+- copies species and nickname for known mons from the snapshot, adds mons that are in the game but not on the sheet, and sets Badges.
+
+Limitation: kill credit for one enemy Pokémon can belong to only one of your mons. If you play the same fight twice with different killers and then jump between the two timelines, the most recent credit wins. Manual Add KO clicks are never undone.
+
+## Development setup
+
+Requires Node (see `.nvmrc`) and `clasp` (installed by `npm install`).
+
+1. `npm install`, then `npx clasp login`.
+2. **Work on a copy of the sheet.** Make a copy of the spreadsheet (File → Make a copy); it comes with its own bound script. Then run `npm run setup-clasp`. It asks for the prod script ID and the dev (copy) script ID (Apps Script → Project Settings → IDs) and writes `.clasp.json` (prod, `rootDir` set to `appsscript`) and `.clasp.dev.json` (dev). Both files are gitignored because they contain script IDs. Re-running offers your current IDs as defaults. Plain `clasp` commands use the prod file; `deploy-dev.sh` is the only thing that uses the dev file, and it never touches prod.
+3. `npm run gen-token` creates a random `TOKEN` in `.env` and prints it. In the dev copy's Apps Script → Project Settings → Script Properties set:
+   - `TOKEN` — the printed value
+   - `ENV` — `dev` (enables the test-only `dump` and `reset` actions; they refuse to run otherwise, so tests can't touch a real sheet)
+4. `npm run deploy:dev` stages the files, pushes them to the dev script, deploys, and writes `DEPLOYMENT_ID` and `WEB_APP_URL` to `.env`. Re-running redeploys to the same URL.
+5. Open `WEB_APP_URL` once in a browser and approve the permission prompt. You should then see `{"ok":false,"error":"unauthorized"}`, which means it's working and just needs the token.
+
+`.env`, `.clasp.json`, `.clasp.dev.json` and `fixtures/private/` are gitignored.
+
+## Tests
+
+```
+npm run test:sheet                    # all scenarios
+npm run test:sheet -- --only rewind   # scenarios whose name contains "rewind"
+npm run test:sheet -- --dump          # also print sheet state after each scenario
+```
+
+These run against the **dev** web app and take around two minutes (each request takes a few seconds). Each scenario resets the dev sheet first and again at the end. They cover catches, kills and sorting, deaths, evolutions, trades, splits, rewinds and forward jumps via `sync`, killer re-attribution, run mismatches, duplicate events, and that row formulas (including the `U:W` bar graph) still reference their own row after a sort.
+
+## Not built yet
+
+See [DESIGN.md](DESIGN.md): the mGBA Lua script that reads the game, and the local relay that forwards its events to the web app.

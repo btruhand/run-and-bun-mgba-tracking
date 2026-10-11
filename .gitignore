@@ -1,0 +1,9 @@
+node_modules
+.env
+*.gba
+*.sav
+*.ss*
+fixtures/private/
+.build
+.clasp.json
+.clasp.dev.json
