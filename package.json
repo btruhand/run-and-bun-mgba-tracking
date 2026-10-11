@@ -11,6 +11,7 @@
     "gen-token": "node scripts/gen-token.js",
     "deploy:dev": "scripts/deploy-dev.sh",
     "test:sheet": "node tests/sheet/run.mjs",
+    "test:lua": "lua tests/lua/run.lua",
     "setup-clasp": "node scripts/setup-clasp.js"
   },
   "keywords": [

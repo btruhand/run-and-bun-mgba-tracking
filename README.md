@@ -2,7 +2,7 @@
 
 Tooling to keep a Google Sheets kill tracker (the `Rankings` tab of the "R&B kill sheet") up to date automatically while playing Pokémon Run & Bun in a hardcore Nuzlocke.
 
-The long-term goal is for mGBA to feed the sheet directly; see [DESIGN.md](DESIGN.md) for the full design. **What exists today is the sheet side only:** a refactored Apps Script project with a web app endpoint that accepts game events, plus tests for it. Nothing reads the emulator yet.
+The long-term goal is for mGBA to feed the sheet directly; see [DESIGN.md](DESIGN.md) for the full design. **What exists today:** a refactored Apps Script project with a web app endpoint that accepts game events, and an mGBA Lua script that tracks battles (kills, deaths, splits). The Lua script prints events to the mGBA console; the relay that forwards them to the sheet is not built yet.
 
 ## What's here
 
@@ -12,12 +12,25 @@ appsscript/
   Rankings.js    shared helpers for the Rankings tab (used by onEdit and the web app)
   WebApp.js      web app: receives events and applies them to the sheet
   appsscript.json
+lua/
+  tracker.lua    mGBA entry point: load this in mGBA
+  battle.lua     battle tracker (kill / death / split events)
+  gen3.lua       Gen 3 decoding (party structs, names, flags, play time)
+  addresses.lua  the Run & Bun 1.0.7 memory map
+  json.lua       JSON encoder
+  spike/         read-only probes used to find the addresses
+docs/
+  MEMORY_MAP.md  the Run & Bun 1.0.7 addresses and struct layouts
+  lua_progress/  Lua tracker status (README.md) and how the addresses were found (spike-log.md)
 scripts/
   gen-token.js   generates the shared secret
   setup-clasp.js asks for the prod and dev script IDs and writes the two clasp files
   deploy-dev.sh  pushes to the DEV sheet and (re)deploys the web app
 tests/sheet/
   run.mjs        scenario tests against the dev web app
+tests/lua/
+  run.lua        tracker tests (no emulator needed)
+  fakemem.lua    fake memory the tests write game structures into
 fixtures/private/   your ROM / savestates (gitignored)
 ```
 
@@ -109,6 +122,28 @@ npm run test:sheet -- --dump          # also print sheet state after each scenar
 
 These run against the **dev** web app and take around two minutes (each request takes a few seconds). Each scenario resets the dev sheet first and again at the end. They cover catches, kills and sorting, deaths, evolutions, trades, splits, rewinds and forward jumps via `sync`, killer re-attribution, run mismatches, duplicate events, and that row formulas (including the `U:W` bar graph) still reference their own row after a sort.
 
+## Lua tracker
+
+Load `lua/tracker.lua` in mGBA 0.10.3 (Tools → Scripting → File → Load script) with Run & Bun 1.0.7 running. It checks the ROM's name tables first and refuses to start on anything else. Events appear in the scripting console as `EVENT {json}`:
+
+| type | when |
+|------|------|
+| `kill` | an enemy mon in a **trainer** battle faints; credited to your mon on the field. `split` is leaders defeated + 1, `trainer` is the opponent's id, `key` is `<trainer>:<enemy party slot>` |
+| `death` | one of your mons fainted in a battle (sent when the battle ends) |
+| `split` | a gym leader was beaten; `badges` is how many of the eight leaders are defeated |
+
+Events carry `run` (your trainer id) and `playTime`; `id` is added later by the relay. Kills in doubles use the leftmost live mon and set `ambiguous` when both of yours were alive (the attacker isn't read yet). A jump in play time (loading a savestate or a save) drops the current battle without emitting anything.
+
+Not detected yet: catches, evolutions, trades, and the `sync` snapshot.
+
+## Lua tests
+
+```
+npm run test:lua      # needs a `lua` interpreter (5.4+) on the PATH
+```
+
+They run the tracker against a fake memory, no emulator or ROM. The scenarios named "observed" replay frame sequences logged from real fights, such as the enemy slot briefly showing a replacement's species with the previous mon's HP during a switch-in.
+
 ## Not built yet
 
-See [DESIGN.md](DESIGN.md): the mGBA Lua script that reads the game, and the local relay that forwards its events to the web app.
+See [DESIGN.md](DESIGN.md): detection of catches, evolutions and trades; the `sync` snapshot; and the local relay that forwards the Lua script's events to the web app.
