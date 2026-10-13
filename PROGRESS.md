@@ -1,6 +1,6 @@
 # Progress
 
-Last updated 2026-10-11. The design is in [DESIGN.md](DESIGN.md); the Lua details are in [docs/lua_progress/](docs/lua_progress/README.md).
+Last updated 2026-10-12. The design is in [DESIGN.md](DESIGN.md); the Lua details are in [docs/lua_progress/](docs/lua_progress/README.md).
 
 Legend: `[x]` done and checked, `[~]` done but only partly checked (noted), `[ ]` not started.
 "Live" means confirmed in mGBA during play. "Dev sheet" means confirmed on the copy of the spreadsheet, not the real one.
@@ -108,7 +108,7 @@ Done and tested on the **dev copy** only.
 ## 7. Docs
 
 - [x] README, MEMORY_MAP, lua_progress, this file
-- [ ] Refresh DESIGN.md: it still says the split comes from badge flags (it uses leader flags), assumes `gBattlerAttacker` attribution, and its spike and build-plan sections predate the findings
+- [x] DESIGN.md refreshed to match what is built: a badge increase advances the split (read as the number of defeated gym leaders; the web app sets `Badges`), field-mon kill credit with `ambiguous` in doubles, catch and evolution detection, what is not built yet
 - [ ] README sections for the relay and the captures once they exist
 
 ## Suggested order
@@ -118,4 +118,4 @@ Done and tested on the **dev copy** only.
 3. **`sync`** and new-run handling
 4. **Relay**, plus the Lua socket output; first end-to-end run against the dev sheet
 5. Roll out to the real sheet; first real leader win confirms the `split` flow
-6. Doubles attacker, polish and the design refresh
+6. Doubles attacker and polish

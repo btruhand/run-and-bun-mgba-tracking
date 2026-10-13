@@ -2,7 +2,7 @@
 
 Tooling to keep a Google Sheets kill tracker (the `Rankings` tab of the "R&B kill sheet") up to date automatically while playing Pokémon Run & Bun in a hardcore Nuzlocke.
 
-The long-term goal is for mGBA to feed the sheet directly; see [DESIGN.md](DESIGN.md) for the full design and [PROGRESS.md](PROGRESS.md) for what is done and what is left. **What exists today:** a refactored Apps Script project with a web app endpoint that accepts game events, and an mGBA Lua script that tracks battles (kills, deaths, splits). The Lua script prints events to the mGBA console; the relay that forwards them to the sheet is not built yet.
+The long-term goal is for mGBA to feed the sheet directly; see [DESIGN.md](DESIGN.md) for the full design and [PROGRESS.md](PROGRESS.md) for what is done and what is left. **What exists today:** a refactored Apps Script project with a web app endpoint that accepts game events, and an mGBA Lua script that tracks battles (kills, deaths, splits), catches and evolutions. The Lua script prints events to the mGBA console; the relay that forwards them to the sheet is not built yet.
 
 ## What's here
 
@@ -168,4 +168,4 @@ This is how catches, evolutions and PC moves were observed (the traces are in [d
 
 ## Not built yet
 
-See [DESIGN.md](DESIGN.md): detection of evolutions and trades; the `sync` snapshot; and the local relay that forwards the Lua script's events to the web app.
+See [DESIGN.md](DESIGN.md): detection of trades; the `sync` snapshot; and the local relay that forwards the Lua script's events to the web app.

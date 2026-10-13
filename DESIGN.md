@@ -1,14 +1,21 @@
 # Run & Bun Nuzlocke Auto-Tracker — Design
 
 Automatically keep the existing "R&B kill sheet" (Google Sheets, `Rankings` tab) up to date while playing
-Pokémon Run & Bun in mGBA. Status: **brainstorm / design only — nothing built yet.**
+Pokémon Run & Bun 1.0.7 in mGBA 0.10.3. This file is the design and the reasons behind it. What is built and
+checked is in [PROGRESS.md](PROGRESS.md); addresses and observed game behavior are in
+[docs/MEMORY_MAP.md](docs/MEMORY_MAP.md).
+
+Status in one line: the Lua tracker (kills, deaths, splits, catches, evolutions) and the web app are built; trades,
+`sync` and the relay are not, so events only reach the mGBA console today.
 
 ## Goals
 
 1. **Kill counter per split.** When one of my Pokémon KOs a *trainer's* Pokémon, +1 in the current split's column (Split 1–8, E4 Split) for that Pokémon, and Total KC follows.
-2. **Auto-add catches** to the tracker (species, nickname, encounter location).
+2. **Auto-add catches** to the tracker (species, nickname, encounter location), including the starter.
 3. **Auto-mark deaths** (Status → Dead).
-4. **Auto-evolve** — when a Pokémon evolves, change its row's species to the new one (keeping its KC history).
+4. **Auto-evolve**: when a Pokémon evolves, change its row's species to the new one, keeping its KC.
+5. **Trades** replace the row's mon in place and keep its KC.
+6. **Savestates and old saves** don't corrupt the sheet.
 
 Non-goals (for now): level-cap enforcement, dupes/species-clause checking, wild-battle kills, gender/IMG beyond what the sheet already derives, live overlay.
 
@@ -26,224 +33,228 @@ Non-goals (for now): level-cap enforcement, dupes/species-clause checking, wild-
 | 8 | Juan | Juan |
 | E4 | Victory Road + E4 | (run end) |
 
-The leader fight itself counts toward its own split; the split advances once that leader's defeated-flag is set.
-**Current split is derived from game state** (leader-defeated / badge flags in save data), not from the route the fight happens on — a route is only useful as a label for the encounter-location column on catches.
-The sheet's existing **Advance Split** checkbox stays as a manual override/fallback.
+**A badge increase advances the split.** The sheet's `Badges` cell (`AA4`) picks the KC column (`K + Badges`), and
+the Advance Split checkbox just does `Badges++`. The tracker does the same thing from the game: when you earn a
+badge, it sends `split {badges}` with the new count, and the web app sets `Badges` to it. The leader fight itself
+counts toward its own split, because the kill that finishes the leader is sent before the badge increase.
+
+- **How the tracker sees the increase.** It counts the gym leaders whose trainer-defeated flag is set (0–8). Each
+  leader hands over the badge right after the fight, so this count is the badge count; the flag is set on the frame
+  the battle ends, before the badge cutscene. The badge flags themselves are not located in Run & Bun (the vanilla
+  flag numbering doesn't match), and are not needed; they would only be a cross-check.
+- Because it's a count, the order the leaders are beaten in doesn't matter.
+- **Set, not clicked.** The web app writes the count instead of simulating Advance Split: script writes don't
+  trigger `onEdit`, and an increment can drift or double-advance on retries, savestates and old saves. Setting the
+  value gives the same result however often it's applied. Kill events also carry their own split, so a kill lands
+  in the right column even if someone is clicking the sheet at that moment.
+- The Advance Split button stays for manual use.
+- The split is never derived from the route a fight happens on.
 
 ## Architecture
 
 ```
  mGBA (Run & Bun ROM)
-   └─ Lua script (reads RAM, detects events)
-        │  newline-delimited JSON over localhost TCP
+   └─ Lua script (reads RAM, detects events)                  built
+        │  newline-delimited JSON over localhost TCP           not built (prints to the console today)
         ▼
- Local relay (small daemon, disk-backed queue, retries)
+ Local relay (small daemon, disk-backed queue, retries)       not built
         │  HTTPS POST + shared secret
         ▼
- Apps Script web app  (doPost, bound to the existing sheet)
+ Apps Script web app  (doPost, bound to the sheet)            built, on the dev copy
         │  dedupes by event id, mutates sheet
         ▼
- Rankings sheet  (+ hidden `_Events` log tab, hidden PID column)
+ Rankings sheet  (+ hidden `_Events` / `_Issues` tabs, hidden ID column Y)
 ```
 
 Why this shape:
 
-- **mGBA Lua can't do HTTPS** (raw TCP sockets only), so something local has to sit in the middle. The relay is deliberately dumb: forward, queue on disk, retry. It holds no game logic.
-- **Apps Script as the sheet writer** (vs. Sheets API + service account): no GCP project/OAuth, it can call the *existing* script functions (Advance Split, sort/rank, counters), and it's where dedupe lives. Trade-off: web-app deployment + a shared-secret token in Script Properties.
+- **mGBA Lua can't do HTTPS** (raw TCP sockets only), so something local has to sit in the middle. The relay is deliberately dumb: stamp ids, forward, queue on disk, retry. It holds no game logic.
+- **Apps Script as the sheet writer** (vs. Sheets API + service account): no GCP project/OAuth, it shares the row logic with the existing buttons, and it's where dedupe lives. Trade-off: web-app deployment + a shared-secret token in Script Properties.
 - **Lua emits events, not sheet edits.** Lua stays small and testable; all sheet knowledge (rows, columns, formulas) is in one place.
-- **Idempotency via event IDs.** Each event has a unique id (`<run-id>:<seq>`). Apps Script records processed ids in `_Events` and ignores repeats, so relay retries, relay restarts, and replays are safe. `_Events` doubles as an audit log and enables an "undo last event" action.
-- **Increments, not overwrites.** The script applies deltas (`KC += 1`), so manual edits to the sheet (the Add KO checkbox, fixes) are never clobbered by a stale local state.
+- **Idempotency via event ids.** Each event has a unique id (`<run>:<seq>`, stamped by the relay). The web app records processed ids in `_Events` and ignores repeats, so retries, relay restarts and replays are safe.
+- **Increments, not overwrites, for kills.** The web app applies deltas (`KC += 1`), so manual edits (the Add KO checkbox, fixes) are never clobbered.
 
-### Language choices (recommended)
-
-- Lua 5.4 (mGBA built-in) for the in-emulator script.
-- Python 3, stdlib only (`asyncio` + `urllib`), for the relay. Easy to run on macOS with no install.
-- Apps Script (manage with `clasp` so it lives in this repo).
+Languages: Lua 5.4 (mGBA built-in); Python 3 stdlib for the relay; Apps Script managed with `clasp` in this repo.
 
 ## Identifying a Pokémon
 
-Use **personality value (PID) + OT ID** as the stable key. It survives evolution, nickname changes, and box↔party moves, so it is the join key between game and sheet.
-Column `E` is **in use** (a formula: `=IF(T3="","",IFERROR(VLOOKUP(T3,{Gemstones!$B:$B,Gemstones!$A:$A},2,FALSE),""))` keyed off Total KC) — the script never writes it and it already sorts along with its row; and `D:T` is otherwise fully used, so the ID goes in a new hidden column **outside** the current sort range (proposed: `Y`, one of the narrow spacer columns). It must travel with its row when the sheet re-sorts, so the sort range is widened to `D3:Y102` (the legacy `autoSortRange` already sorted through `W`, so `U:W` formulas have been sorted along before). **Must be tested on a copy**: if `U:W` misbehave when sorted, fall back to sorting in script (read `D:T` + `Y` with `getFormulasR1C1`, sort in JS, write back). Never match on row number or species/nickname: rows move on every sort. (Reset Run must also clear the ID column.)
+**Personality value + OT id** (`"0xA1B2C3D4:0x1234ABCD"`) is the key. Both are stored unencrypted at the start of the struct, so they read correctly even on frames where the rest is being rewritten. The key survives evolution, nickname changes and box↔party moves, and joins game and sheet.
+
+It goes in hidden column **`Y`**, outside `D:T` (which is fully used; `E` is a formula keyed off Total KC). The sort range is widened to `D3:Y102` so the id travels with its row; the `U:W` formulas were checked on the dev copy to still reference their own row after a sort. Rows move on every sort, so rows are always looked up by id, never by row number or species/nickname. Reset Run also clears the id column.
 
 ## Event detection (Lua)
 
-Run & Bun is a pokeemerald-expansion–based hack, so Gen 3 structures apply but with **expanded species IDs and likely shifted addresses** — see Spike 0.
+Run & Bun is built on pokeemerald-expansion: Gen 3 structures, but expanded species ids and shifted addresses (none of the vanilla Emerald addresses apply). Everything is polled from the `frame` callback; mGBA 0.10.3 has no usable breakpoints from Lua.
 
-Polling on the `frame` callback (every N frames for party scanning; every frame while in battle), emitting on state *changes*.
+Facts from real play that shape every detector (details in docs/MEMORY_MAP.md):
+
+- **The game decrypts a mon in place while it works on it**, so for single frames its data is garbage and the substruct checksum fails (level-ups, evolution, party menu, battle start). A mon read is only trusted when its checksum is valid, and a change only when it reads the same on two scans.
+- **Party slots move** (a deposit compacts the party), **`gPlayerPartyCount` goes stale** (in the PC, and for a frame in battle), and **a mon can be in neither party nor box** for a while (withdraw, Move Pokémon). Mons are tracked by key, never by slot or count, and a disappearance means nothing on its own.
+- **`gBattleMons` is rewritten in pieces on a switch-in**, briefly showing the new mon with the old mon's HP.
 
 ### Reading Pokémon
-- Party (6 × 100-byte structs) and PC boxes (via the storage pointer).
-- Substructs are encrypted with `PID ^ OTID` and ordered by `PID % 24`; species/level/HP come from the decrypted data. Nickname uses the Gen 3 charset.
-- Save block data (flags, badges, map) is behind a **pointer** (`gSaveBlock1Ptr`), so dereference every read.
+- Party (6 × 100-byte structs), enemy party, and PC boxes (14 × 30 × 80 bytes, via `gPokemonStoragePtr`).
+- Substructs are encrypted with `personality ^ OT id` and ordered by `personality % 24`; species and met location come from the decrypted data. Nicknames use the Gen 3 charset; names (species, trainers, map sections) are read from the ROM's own tables, so there is no hand-maintained list.
+- Save block data (flags, play time, trainer id) is behind pointers, dereferenced on every read.
 
 ### Catch
-- Keep a set of known PIDs (seeded from the sheet / snapshot at startup). A PID appearing in party or boxes that isn't known → `catch` event with species, nickname, and location.
-- **Location comes straight from the game**: every Pokémon records where it was met (`metLocation`, a map-section id) in its own data. Read that and translate it with the game's own map-section name table (read from the ROM, so no hand-maintained list). The string is written to column `J` as-is, whether or not it's in the dropdown (script writes bypass dropdown validation). Gifts/the starter have the special "fateful encounter" met-location, which gives exactly the `Fateful` entry already in your dropdown. Small alias table in `data/` only if some game names differ from what you want to see.
-- Gifts, the starter, static encounters and hatched/received mons all just appear as new PIDs and are added the same way; `source: catch|gift` is recorded for the log only.
-- **Trades:** an in-game trade replaces one of your mons with another. Detect it as: a tracked PID disappears and, in the same stable scan, an unknown PID appears in the **same party/box slot** with a different original-trainer ID. Emit `trade {old_pid, new_pid, species, nick, location}`. The sheet **substitutes in place**: same row, species/nickname/location/ID replaced, status stays Alive. The row's KC is kept (assumption — substituting the entry, not starting a new one). A PID that vanishes with *no* replacement is not a trade; it's `missing` (see Death).
-- Debounce: require the new PID to be seen on 2+ consecutive scans, and ignore scans while in a transition (battle intro, box UI) to avoid phantom adds from mid-swap memory.
+- **Wild or static catch:** when a battle ends with `gBattleOutcome = 7` (caught), the enemy mon's key is looked up in the party and boxes and read from where it was stored, so the nickname is the final one. The game stores it after the nickname prompt, before the battle ends; the lookup retries for ~10 s in case it isn't there yet or is mid-rewrite.
+- **Starter (and any new own-OT mon outside battle):** a party scan every 30 frames, out of battle only. A new mon must read the same with a valid checksum on two scans. The starter is given by script before the first battle.
+- **Location** is the mon's own met location, translated with the ROM's map-section table and written as-is (script writes bypass the dropdown validation). Met location 255 reads as "Fateful Encounter".
+- **Known mons:** everything in the party and boxes when tracking starts, or after a savestate/save load, is recorded as known without sending anything; `sync` reconciles those with the sheet. A mon is sent at most once per timeline, and the sheet ignores a catch for an id it already has. Catching a species you already have is a new mon and a new row (logged). Evolution lines are not checked.
+- Eggs are not sent until they hatch.
+
+### Trade (not built)
+In Run & Bun, gift mons come from NPC trades, and a traded mon always lands in the party. Plan: a tracked key disappears from the party and, in the same stable scan, a new key with **another OT id** appears in the same slot → `trade {old_pid, pid, species, nick, location}`. The sheet substitutes in place: same row, id/species/nickname/location replaced, status and KC kept. Today a new party mon with another OT id is only logged. To check on a real trade: the met location (vanilla uses 254, which the map table doesn't cover; proposed label "In-game Trade") and what the party slot does during the trade screen.
 
 ### Evolution
-- Same PID, different species ID between party scans, read the same with a valid checksum on two scans (scans don't run in battle) → `evolve {pid, from, to, nick?}`. `nick` is sent only when the game renamed the mon (it still had its species name). Sheet updates species (and nick) in place; KC is retained. A change that keeps the species name (a form change) is not sent.
+- Same key, different species between party scans, read the same with a valid checksum on two scans (scans don't run in battle) → `evolve {pid, from, to, nick?}`. Only the party is watched; mons don't evolve in boxes.
+- The game renames a mon that still has its species name (Scatterbug → Spewpa) on the same frame as the species changes; that new name is sent as `nick`. A mon with its own nickname keeps it.
+- A change that keeps the species name (a form change) is logged, not sent.
+- Covers the Endless Candy and evolution items (both seen live). A level-up evolution right after a battle is rare in Run & Bun runs and not tested live; the same scan would see it once the battle ends.
 
 ### Death
-- Party mon HP reaches 0 → candidate. **Commit when the battle ends and HP is still 0** (or immediately when out of battle), so a mid-battle faint that's later handled isn't misread. Revives are illegal in the ruleset, so no un-death logic; a manual sheet edit can fix mistakes.
-- A PID that disappears from party+boxes is **not** treated as dead (could be released/traded); emit `missing` and let the sheet flag it. Require absence over several stable scans so box swaps don't trigger it.
+- One of your mons fainting in any battle (wild or trainer) is committed as `death` when the battle ends, once per mon.
+- Run & Bun has no overworld fainting, so nothing outside battle is watched.
+- Revives are illegal in the ruleset, so there is no un-death logic; a manual sheet edit fixes mistakes.
+- A key that disappears from party and boxes is **not** a death (it may be in transit, released or traded). A `missing` event is in the plan but not built.
 
-### Kill (the hard one)
-- Only when `gBattleTypeFlags` says **trainer battle** (wild kills ignored).
-- Each frame in battle, watch each enemy battler's HP in `gBattleMons`. On `>0 → 0` for an opposing battler, attribute the kill to `gBattlerAttacker` **if** it's a player-side battler. That gives the right credit in doubles (Run & Bun has them) since the attacker is still set while the damage script runs.
-- Self-KO moves (Explosion) still credit the user.
-- **Indirect KOs** (poison, weather, hazards, recoil, Destiny Bond…) **count for the player's mon currently on the field** (decided). Rule: if `gBattlerAttacker` isn't a player battler when the enemy faints, credit the player battler that most recently attacked this turn; if none, the leftmost active player battler (singles: just the active mon). Emit these with `indirect: true` so they're visible in the log and easy to correct.
-- Map the attacker battler to its party slot → PID (read party at battle start, since slots reorder on switch; re-resolve from `gBattlerPartyIndexes`).
-- Target is **mGBA 0.10.3**. Assume polling only (breakpoint/watchpoint Lua APIs may not exist in 0.10 — verify in Spike 0; use them only if present). `socket`, `emu:read*`/`readRange` and the `frame` callback are available.
-- Event includes the **split** computed from game flags at that moment.
+### Kill
+- Only when `gBattleTypeFlags` bit 3 says **trainer battle** (wild kills ignored). `gTrainerBattleOpponent_A` is stale after a battle, so it's only read when that bit is set.
+- Every frame in battle, each enemy battler's HP in `gBattleMons` is watched. A `> 0 → 0` drop counts only if species, level, max HP, personality and OT id are the same as on the previous frame (this rejects the switch-in glitch). Each enemy party slot is credited once (`key = <trainer>:<enemy slot>`).
+- **Singles:** credited to your mon on the field. That also gives the decided rule for indirect KOs (poison, weather, hazards, recoil, Destiny Bond): they count for the mon currently on the field.
+- **Doubles:** `gBattlerAttacker` is not located yet, so the kill goes to your leftmost live mon and the event carries `ambiguous: true` when both of yours were alive. Once the attacker is found, doubles credit becomes exact and an `indirect` flag can mark KOs the attacker didn't cause.
+- The event carries the split at that moment (leaders defeated + 1), the trainer id and the enemy's name.
 
-### Split / progress
-- Count the eight leader-defeated/badge flags in game → `badges` (0–8). Split index = `badges` (0 → Split 1 … 7 → Split 8, 8 → E4 Split). Emit `split {badges}` when it changes.
-- **Don't simulate a click on Advance Split.** `AA4` *is* the `Badges` cell (row 4 of the right-hand panel), and the Advance Split checkbox just does `AA4++` in `onEdit`, which script writes never trigger anyway. The web app **sets `AA4 = badges`** directly. Same effect, but idempotent: it can't drift or double-advance on retries, savestates or old saves (an increment would). The kill column is still `K + AA4`, so your idea of "Badges decides the split column" is exactly what the sheet already does; we just feed it from the game. The button stays for manual use.
+### Split
+- After each battle, count the defeated gym leaders (see Splits). If the count went up, send `split {badges}`.
+- The leader ids (264–271) come from the ROM's trainer table and haven't been confirmed against a real leader fight yet.
 
 ## Event schema
 
-All events: `{ id, run, playTime, type, ... }` where `id` is `<run>:<seq>` (seq persisted by the relay), `run` is the save's trainer ID + secret ID, and `playTime` is **in-game play time in seconds** (see "Savestates & rewinds").
+All events: `{ id, run, playTime, type, ... }`. `id` is `<run>:<seq>` (stamped by the relay, sequence persisted), `run` is the save's trainer id + secret id, and `playTime` is **in-game play time in seconds** (see "Savestates & old saves").
 
 ```json
-{"type":"sync","playTime":43424,"mons":[{"pid":"...","species":"Piplup","hp":0,"where":"party|box"}],"defeated":["<trainerId>",...],"badges":2,"complete":true}  // on script start and on any play-time discontinuity
-{"type":"catch","pid":"0xA1B2C3D4:0x1234ABCD","species":"Piplup","nick":"","location":"Route 104","source":"catch"}
-{"type":"trade","old_pid":"...","pid":"...","species":"Nincada","nick":"","location":"Route 116"}
-{"type":"kill","pid":"...","split":2,"enemy":"Roxanne's Nosepass","trainer":"<trainerId>","key":"<trainerId>:<enemySlot>","indirect":false}
+{"type":"catch","pid":"0xA1B2C3D4:0x1234ABCD","species":"Starly","nick":"Starly","location":"Route 102"}
+{"type":"kill","pid":"...","split":2,"enemy":"Roxanne's Nosepass","trainer":"<trainerId>","key":"<trainerId>:<enemySlot>","ambiguous":true}   // ambiguous only in doubles
 {"type":"death","pid":"..."}
 {"type":"evolve","pid":"...","from":"Scatterbug","to":"Spewpa","nick":"Spewpa"}   // nick only if the game renamed it
 {"type":"split","badges":3}
-{"type":"snapshot","party":[...],"boxes":[...]}          // periodic, for reconciliation
+{"type":"trade","old_pid":"...","pid":"...","species":"Nincada","nick":"","location":"In-game Trade"}   // not sent yet
+{"type":"sync","playTime":43424,"mons":[{"pid":"...","species":"Piplup","nick":"","hp":0,"where":"party|box"}],"defeated":["<trainerId>",...],"badges":2,"complete":true}   // not sent yet
 ```
 
-Species names must match what the `Sprites` tab / IMG column expects; a species-ID→name table (Run & Bun's expanded list) lives in `data/`. Locations are whatever the game reports (see Catch).
+Species names come from the ROM's species table and must match what the `Sprites` tab / IMG column expects.
 
 ## Savestates & old saves
 
 **Problem.** Loading a savestate or an older `.sav` rewinds the *game* but not the *sheet*. A kill counter that only ever does `+1` would keep credit for things that, in the timeline you're now in, never happened (or happen again and double-count).
 
-**Key observation: split what the game remembers from what it doesn't.**
+**What the game remembers and what it doesn't:**
 
 | Fact | Does the game store it? | Where the sheet gets it |
 |------|------------------------|-------------------------|
-| Which mons exist, their species, nickname, location | Yes | **Read from the game** — always correct after any load |
+| Which mons exist, their species, nickname, location | Yes | **Read from the game**, always correct after any load |
 | Which trainers are defeated, badges/split | Yes (flags) | **Read from the game** |
 | Alive / dead | Only partly (a fainted party mon has 0 HP; a boxed mon loses that) | Journal, checked against the game where possible |
 | **Who got each kill** | **No** | **Journal only** |
 
-So only *kills* (and deaths of boxed mons) depend on remembered history. Everything else is just re-synced from the game.
+So only kills (and deaths of boxed mons) depend on remembered history. Everything else is re-synced from the game.
 
-**Mechanism: a journal + a "sync" check on every discontinuity.**
+**Mechanism: a journal + a `sync` on every discontinuity.**
 
-1. **Journal.** Every automatic event is appended to a hidden `_Events` tab: id, run, in-game play time (`playTime`), type, pid, payload, `active` flag, and the inverse operation (kill → `-1` on that column; catch → remove row; death → Alive; evolve → previous species; trade → swap back).
-2. **Detect a load.** In-game play time (in the save block; ticks every frame in RAM; restored by savestates and `.sav` loads) normally advances ≤ 1 s between frames. If it **jumps in either direction** (or on script start), the Lua script sends `sync` containing a snapshot of the game: `playTime`, every mon (pid, species, HP, party/box), the set of defeated-trainer flags, and the current split. It then re-seeds its own memory from the game without emitting events.
-3. **Reconcile (Apps Script).** For the same `run`, each journal event is re-evaluated against the snapshot and its `active` flag set accordingly:
-   - `playTime` later than `sync.playTime` → **inactive** (it hasn't happened yet in this timeline) — apply the inverse.
-   - `catch` / `trade` / `evolve`: active only if the pid (and species) is in the snapshot.
-   - `kill`: active only if that trainer is flagged defeated in the snapshot (or `playTime` ≤ now when the fight is mid-battle).
-   - `death`: active unless the pid is in the party with HP > 0.
-   - Anything previously inactive that now checks out is **re-applied**, so jumping *forward* to a newer savestate restores what a previous backward jump undid.
-   Then sheet species/nickname/location for every tracked pid are overwritten from the snapshot, mons in the game but not on the sheet are added, and the current split is set from the flags.
-4. **Inverses are conditional** (decrement only if > 0; revert species only if it still equals the event's `to`), so manual edits are never fought. Skipped inverses are written to `_Issues`.
-5. A **different `run`** (new trainer ID) never triggers reconcile; it is flagged until you press Reset Run.
+1. **Journal (built).** Every applied event is appended to a hidden `_Events` tab: id, run, play time, type, pid, payload, `active` flag, and its inverse (kill → `-1` on that column; catch → remove row; death → Alive; evolve → previous species and nickname; trade → swap back; split → previous Badges).
+2. **Detect a load (built in Lua, `sync` not sent yet).** In-game play time normally advances ≤ 1 s between frames. A jump in either direction (or script start) means a load. Today the Lua side resets its battle and mon trackers silently. The plan is to also send `sync`: play time, every mon (key, species, nickname, HP, party/box), the defeated trainers and the badge count.
+3. **Reconcile (built in the web app).** For the same `run`, each journal event is re-evaluated against the snapshot:
+   - `playTime` later than `sync.playTime` → **inactive** (hasn't happened yet in this timeline); the inverse is applied.
+   - `catch` / `trade` / `evolve`: active only if the mon is in the snapshot.
+   - `kill`: active only if that trainer is flagged defeated in the snapshot.
+   - `death`: active unless the mon is in the party with HP > 0.
+   - Anything previously inactive that now checks out is **re-applied**, so jumping *forward* to a newer savestate restores what a backward jump undid.
+   Then species/nickname for every tracked mon are overwritten from the snapshot, mons in the game but not on the sheet are added, and `Badges` is set from the snapshot.
+4. **Inverses are conditional** (revert species only if it still equals the event's `to`, and so on), so manual edits are never fought. Skipped inverses are written to `_Issues`.
+5. A **different `run`** (new trainer id) is held, never reconciled, until you press Reset Run.
 
-**Worked example.** You're at play time 10:00. Kill A (10:05, Mudkip), kill B (10:20, Mudkip), catch X (10:30). Then you realise you forgot to save and load the save from 10:10:
-- Play time jumps 10:30 → 10:10 → `sync`. Kill B and catch X are inactive (inverse applied: −1 on Mudkip, X's row removed). Kill A stays (its trainer is still flagged defeated in this save).
+**Worked example.** You're at play time 10:00. Kill A (10:05, Mudkip), kill B (10:20, Mudkip), catch X (10:30). Then you load the save from 10:10:
+- Play time jumps 10:30 → 10:10 → `sync`. Kill B and catch X are inactive (−1 on Mudkip, X's row removed). Kill A stays (its trainer is still flagged defeated in this save).
 - You replay 10:10 onward and Torchic gets the kill instead. A new kill event is journaled and applied. Mudkip stays at 1, Torchic gets 1.
-- If you now load the *newer* savestate from 10:30 again: `sync` → the old kill B's trainer is flagged defeated again and X is in the party again → both re-activate. (See limitation below about Torchic's kill.)
+- If you now load the *newer* savestate from 10:30 again: `sync` → kill B's trainer is flagged defeated again and X is in the party again → both re-activate (see the first limitation about Torchic's kill).
 
-**Limitations (stated plainly).**
-- **Same fight, two branches.** Kill credit for one enemy mon (`key = trainerId:enemySlot`) can only belong to one mon. If you play a fight twice with different killers and then jump between the two branches, the *most recently recorded* credit wins, so you could land on the wrong branch's attribution. Flagged in `_Issues`; fixable with the manual Add KO / an "undo last event" command. A cheap improvement if it bites: include the battle's starting RNG state in the key to tell branches apart.
+**Limitations.**
+- **Same fight, two branches.** Credit for one enemy mon (`key`) can only belong to one mon. If you play a fight twice with different killers and then jump between the two branches, the most recently recorded credit wins. Flagged in `_Issues`; fixable by hand. If it bites, the battle's starting RNG state could go into the key to tell branches apart.
 - Manual Add KO clicks are not journaled and are never rolled back.
-- A boxed mon's death can't be verified from the game; it relies on `playTime` only.
-- If the relay/sheet was offline while you loaded states, the `sync` is queued and processed in order, so the outcome is the same, just late.
-- A **manual "Resync" action** (menu item in the sheet) re-sends a `sync`-style snapshot on demand.
+- A boxed mon's death can't be verified from the game; it relies on play time only.
+- If the relay or sheet was offline while you loaded states, the `sync` is queued and processed in order, so the outcome is the same, just late.
 
-## Sheet changes (Apps Script)
+## Sheet (Apps Script)
 
-### What the existing `Sorter.js` does (read from the repo)
+### The existing sheet
 
-- Single `onEdit(e)` on the `Rankings` tab; rows **3–102** (100 mons). Columns: `D` gender, `F` status, `G` IMG, `H` nickname, `I` species, `J` encounter location, `K:S` the nine split KCs, `T` total KC, `W` Add KO checkbox. `AA2` attempt, `AA4` **Badges = current split as a 0-based offset** (KC column = `K + AA4`), `AA7` Advance Split checkbox (`AA4++`), `AA9` Reset Run checkbox (clears `D, F, H:T`, `AA2++`, `AA4=0`).
-- Entering a value in `J` initialises the row (Status = `Alive`, `K:S` = 0, `T` = 0); clearing it blanks the row.
-- Add KO (`W`) increments the column for `AA4` and recomputes `T`.
-- Every edit re-sorts `D3:T102`: by `T` descending, then by `F` ascending (stable second sort, so Alive above Dead, each ordered by KC).
-- `autoSortRange()` is an older variant sorting `D3:W102`; it looks unused.
+- Rows **3–102** (100 mons). Columns: `D` gender, `E` formula keyed off Total KC, `F` status, `G` IMG, `H` nickname, `I` species, `J` encounter location, `K:S` the nine split KCs, `T` total KC, `U:W` formulas and the Add KO checkbox. `AA2` attempt, `AA4` **Badges** (the 0-based split, KC column = `K + AA4`), `AA7` Advance Split (`AA4++`), `AA9` Reset Run.
+- Entering a location in `J` initialises the row (Alive, KC 0); clearing it blanks the row. Every edit re-sorts by Total KC descending, then Alive above Dead.
+- Alive, Deaths and KO Total are formulas the script never touches.
 
-### Consequences for the design
+### What changed (built, on the dev copy)
 
-- **`onEdit` does not fire for script writes.** The web app can't rely on it: it must do the row init, total recompute and sort itself. So refactor `Sorter.js` into shared helpers — `initRow(sheet,row)`, `recomputeTotal(sheet,row)`, `sortRankings(sheet)`, `addKill(sheet,row,splitIdx)` — called by both `onEdit` and the new web app. Keeps the manual and automatic paths identical.
-- **Rows move on every sort**, and a sort happens after every event. Look rows up by the PID column (inside `D:T`), re-reading after each sort.
-- **Reset Run must also clear the PID column** (and should clear the journal for the old attempt).
-- Capacity is 100 rows; `catch` fills the first empty row in 3–102 (error to `_Issues` if full).
-- Dead mons stay in the table; `death` just sets `F` = `Dead` and re-sorts. The right-hand counters are formulas the script never touches: Alive `=COUNTIF(F3:F102,"Alive")`, Deaths `=COUNTIF(F3:F102,"Dead")`, KO Total `=SUM(T3:T102)`. Other cells (Attempt, Badges, probably Rank) are hand-entered; Badges could optionally be synced from the game's badge flags (opt-in, not in scope for v1).
-- Sort range widens from `D3:T102` to `D3:Y102` for the ID column (see Identifying a Pokémon), in both `onEdit` and the shared `sortRankings` helper.
-
-### New web app (`Code.js`, alongside `Sorter.js`; clasp already targets the repo root)
-
-- `doPost(e)`: verify token (Script Properties) → append to `_Events` → dispatch by `type` → apply → record inverse.
-- `sync`: reconcile as in "Savestates & old saves".
-- `catch`: first empty row; `J` = location (as reported by the game), run `initRow`, set `I` species, `H` nickname, ID column. Skip if the ID is already present.
-- `trade`: find the row by `old_pid`; replace ID, `I`, `H`, `J`; keep status and KC.
-- `kill`: row by PID; `addKill(row, split)` using the event's own split (not `AA4`, which a human may be mid-click on); then sets `AA4` to the game's split if it differs.
-- `death`: `F` = `Dead`; sort.
-- `evolve`: `I` = new species by PID; the nickname too when `nick` is sent.
-- `split`: set `AA4` to the game's split.
-- `snapshot`: reconcile only — write mismatches (mon in game not on sheet, sheet mon missing in game) to `_Issues` instead of silently editing.
-- `LockService` around every write so concurrent POSTs and manual edits don't interleave a sort.
+- **`onEdit` does not fire for script writes**, so the row logic moved from `Sorter.js` into shared helpers in `Rankings.js` (`initRow`, `blankRow`, `recomputeTotal`, `addKc`, `sortRankings`, …), used by both the buttons and the web app.
+- Sort range `D3:Y102` (id column `Y`). Reset Run also clears the id column and the event log.
+- **`WebApp.js`**: `doPost` checks the token (Script Properties), takes `LockService`, skips ids already in `_Events`, holds events from another run, applies each event and journals its inverse, then sorts once. `@OnlyCurrentDoc`. Dev-only `dump` / `reset` actions refuse to run unless `ENV=dev`.
+- Event handling: `catch` fills the first empty row (skipped if the id is already there; `_Issues` if full); `kill` adds 1 to the event's own split column; `death` sets Dead; `evolve` sets the species (and nickname when sent); `trade` swaps id/species/nickname/location in place; `split` sets `Badges`; `sync` reconciles.
+- Not built: a `missing` event, a "Resync" menu item, an "undo last event" command, using the `ambiguous` flag.
 
 ## Edge cases / risks
 
-- **New run.** Never auto-reset. A new trainer ID is flagged; you press Reset Run.
-- **Relay down / offline.** Lua reconnects; relay queues to disk; ids dedupe; play-time ordering keeps rollback correct when delayed events arrive in order.
-- **Apps Script quotas/latency.** Event volume is a handful per battle. Each event does a sort (~1 s); the relay can batch.
-- **Wrong attribution in odd moves** (Pursuit, Future Sight, Perish Song, etc.). Logged with `indirect` flag for review rather than guessed.
-- **Address drift.** Addresses are for Run & Bun **1.0.7**; keep them in one `data/addresses.lua` keyed by ROM hash so other versions fail loudly instead of reading garbage.
-- **Manual edits vs. journal.** Inverses are conditional and manual edits win; `_Issues` records any inverse that was skipped.
+- **New run.** Never auto-reset. Events from a new trainer id are held; you press Reset Run. (What the Lua side does on a new run is still open.)
+- **Relay down / offline.** Lua reconnects; the relay queues to disk; ids dedupe; play-time ordering keeps rollback correct when delayed events arrive in order.
+- **Apps Script quotas/latency.** A handful of events per battle; each request takes a few seconds; the relay batches.
+- **Odd moves** (Pursuit, Future Sight, Perish Song) in doubles may be credited to the wrong mon until the attacker is read; `ambiguous` marks the doubles cases.
+- **Address drift.** Addresses are for Run & Bun **1.0.7** and live in `lua/addresses.lua`. The tracker checks the ROM's name tables at start and refuses to run on anything else.
+- **Manual edits vs. journal.** Inverses are conditional and manual edits win; `_Issues` records any skipped inverse.
+- **Nuzlocke mistakes and play testing** (recatching a mon, duplicate species): handled without errors, never blocked.
 
-## Repo layout (proposed)
+## Repo layout
 
 ```
-DESIGN.md
-appsscript/     Sorter.js, Rankings.js, WebApp.js, appsscript.json (clasp rootDir)
-lua/            tracker.lua, gen3.lua (struct decode), addresses.lua
-relay/          relay.py, config example
-data/           species.json, maps.json, flags
-tools/          replay.py (feed a recorded NDJSON event stream to the web app)
+DESIGN.md, PROGRESS.md, README.md
+appsscript/     Sorter.js, Rankings.js, WebApp.js, appsscript.json
+lua/            tracker.lua (mGBA entry point), battle.lua, mons.lua, gen3.lua, addresses.lua, json.lua
+lua/dev/        remote.lua (drive mGBA from a script; development only)
+lua/spike/      read-only probes used to find addresses
+tools/          remote.py, state.py (offline savestate reads)
+tests/lua/      tracker tests on fake memory
+tests/sheet/    scenario tests against the dev web app
+scripts/        setup-clasp, gen-token, deploy-dev
+docs/           MEMORY_MAP.md, lua_progress/
+relay/          (not created) relay.py
 ```
-
-## Build plan
-
-0. **Spike 0 — RAM map (blocker).** For **mGBA 0.10.3 + Run & Bun 1.0.7**, find: party, enemy party, `gBattleMons`, `gBattlerAttacker`, battle type flags, map group/num, save block pointers, play time, trainer ID, leader-defeated flags, species ID table. Sources: community RAM maps/tracker scripts for the hack, the hack's source if published, or scanning via the mGBA scripting console. Confirm which Lua APIs 0.10.3 really has (`socket`, `io`, any breakpoints).
-1. **Read-only Lua**: decode party + play time, print to the scripting console. Validate against the game UI.
-2. **Relay + Lua socket**: stream events to a local log; no sheet yet.
-3. **Detectors**, one at a time: catch → death → evolve → split → kill → rewind (`sync`). Test against a real save and by loading savestates.
-4. **Refactor `Sorter.js` into shared helpers**, then add the web app on a **copy** of the sheet; replay recorded events with `tools/replay.py`, including rewind scenarios.
-5. Point at the real sheet, play a split live, fix attribution bugs.
 
 ## Testing
 
-Layered so most of it runs with no emulator and no Google account:
+1. **Lua tests, no emulator** (`npm run test:lua`). The detectors run on a fake memory that writes real encrypted structs with checksums at the real addresses, and models the GBA bus's rotated misaligned reads. Several scenarios replay frame sequences logged from real play. Key rules are broken on purpose to confirm a test fails.
+2. **Offline runs on real savestates.** `tools/state.py` reads RAM out of mGBA savestates; a harness runs `tracker.lua` against pairs of real states (e.g. before and after an evolution).
+3. **Driving the real game.** `lua/dev/remote.lua` + `tools/remote.py` press buttons, take screenshots, save/load states and log memory every frame from a script. mGBA 0.10.3 has no `--script` flag, so the remote is loaded by hand once per mGBA session. Not an automated test yet.
+4. **Sheet scenarios on the dev copy** (`npm run test:sheet`). They post event streams (including rewinds, forward jumps, trades and killer re-attribution) to the dev web app, then read the sheet back with the dev-only `dump`. The endpoints refuse `dump` / `reset` unless `ENV=dev`, so tests can never touch the real sheet.
+5. **Not built:** an end-to-end test (Lua → relay → dev web app → sheet) and an automated emulator-in-the-loop test.
 
-1. **Unit tests, no I/O.** Gen 3 struct decoding (Lua) against fixture byte dumps taken from real saves; detectors (catch/trade/evolve/death/kill/split) fed recorded memory snapshots; Apps Script logic (reconcile, row lookup, sort, inverses) written as pure functions over a small sheet adapter, run in Node against an in-memory fake sheet.
-2. **Emulator-in-the-loop (semi-automatic).** mGBA launched with the ROM, a fixture savestate and `--script tracker.lua`; the script runs N frames and the test asserts on the emitted NDJSON. Needs the ROM and fixture savestates locally (gitignored; tests skip if `RNB_ROM` is unset). Verify the exact CLI flags for 0.10.3 in Spike 0.
-3. **Scenario replay against a dev sheet.** `tools/replay.py` posts recorded or hand-written event streams (including the rewind/forward-jump/trade cases) to the dev web app, then reads sheet state back and compares to expected.
-4. **Sheet integration on a copy only.** A *copy* of the spreadsheet with its own bound script, deployed as a web app. A test-only `dump` action (returns `D3:Y102` values + formulas, `AA` panel, `_Events`) and `reset` action (restores a known fixture state) exist only when the script property `ENV=dev`; the endpoints refuse to run otherwise, so tests can never touch the real sheet. This is also where the `U:W`-sorts-with-`Y` question gets answered.
-
-Secrets/config (`.env`, gitignored): dev web-app URL, shared token, `RNB_ROM`. The token also lives in Script Properties.
+Secrets/config (`.env`, gitignored): dev web-app URL, shared token, deployment id. The token also lives in Script Properties.
 
 ## Decisions made
 
 - Only **trainer** kills count; wild kills ignored.
-- **Indirect KOs** credit the player's mon currently on the field (most recent attacker this turn, else leftmost active).
-- Game badge flags drive the split: the web app sets `AA4` (the `Badges` cell) directly rather than clicking Advance Split; the button stays as a manual override.
-- A trade keeps the row's KC.
-- **Location** is read from the Pokémon's own met-location in game and written as-is (no dropdown matching).
-- **Gifts, starter, static encounters** get rows; **trades** substitute in place (KC kept).
+- **Indirect KOs** credit your mon on the field.
+- **A badge increase advances the split.** The tracker reads it as the number of defeated gym leaders, and the web app sets `Badges` to it rather than clicking Advance Split; the button stays for manual use.
+- **Catches** come from the battle outcome (caught) or, outside battle, a new own-OT mon in the party (the starter). Gift mons in Run & Bun come from NPC trades, so they are trades, not catches.
+- A **trade** substitutes the row in place and keeps its KC.
+- **Duplicates:** never add a second row for the same mon (key). Another mon of a species you already have gets its own row; evolution lines aren't checked.
+- **Location** is the mon's own met location, written as-is; 255 is "Fateful Encounter".
+- **Evolutions** change species in place and keep KC; the nickname follows only when the game renamed the mon.
 - Savestates / old saves are handled by the journal + `sync` reconcile; the game is the source of truth for everything it stores.
 - Targets: mGBA 0.10.3, Run & Bun 1.0.7.
 
-## Open items / questions
+## Open items
 
-- (Resolved) `U:W` survive the widened `D3:Y102` sort: verified on the dev copy that every row's formulas still reference their own row. The bar graph's `max` is an absolute `$V$3`, which is fine because the table is sorted by KC.
+- `gBattlerAttacker`, for exact doubles credit and the `indirect` flag.
+- Trades: the met location of a traded mon and the slot behavior on the trade screen.
+- `sync` from Lua, and what the script does on a new run.
+- The relay and the Lua socket output (mGBA 0.10.3's `socket` API not verified yet).
+- The first real gym leader win, to confirm the leader ids and the `split` flow.
