@@ -15,10 +15,12 @@ appsscript/
 lua/
   tracker.lua    mGBA entry point: load this in mGBA
   battle.lua     battle tracker (kill / death / split events)
+  mons.lua       mon tracker (catch events, including the starter)
   gen3.lua       Gen 3 decoding (party structs, names, flags, play time)
   addresses.lua  the Run & Bun 1.0.7 memory map
   json.lua       JSON encoder
   spike/         read-only probes used to find the addresses
+  dev/remote.lua remote control for experiments (see tools/README.md)
 docs/
   MEMORY_MAP.md  the Run & Bun 1.0.7 addresses and struct layouts
   lua_progress/  Lua tracker status (README.md) and how the addresses were found (spike-log.md)
@@ -26,6 +28,12 @@ scripts/
   gen-token.js   generates the shared secret
   setup-clasp.js asks for the prod and dev script IDs and writes the two clasp files
   deploy-dev.sh  pushes to the DEV sheet and (re)deploys the web app
+tools/
+  remote.py      sends Lua chunks to lua/dev/remote.lua running in mGBA (see tools/README.md)
+  state.py       reads RAM out of a savestate offline
+.claude/
+  skills/remote-controlling-mgba/   how a Claude Code session drives the game with the remote
+  agents/mgba-driver.md             subagent for long play-and-trace sequences
 tests/sheet/
   run.mjs        scenario tests against the dev web app
 tests/lua/
@@ -131,10 +139,13 @@ Load `lua/tracker.lua` in mGBA 0.10.3 (Tools → Scripting → File → Load scr
 | `kill` | an enemy mon in a **trainer** battle faints; credited to your mon on the field. `split` is leaders defeated + 1, `trainer` is the opponent's id, `key` is `<trainer>:<enemy party slot>` |
 | `death` | one of your mons fainted in a battle (sent when the battle ends) |
 | `split` | a gym leader was beaten; `badges` is how many of the eight leaders are defeated |
+| `catch` | a mon joined you: a battle ended with the mon caught (it is read from the party or box it was stored in, so the nickname is final), or a new mon with your OT id appeared in the party outside battle (the starter). `species`, `nick`, `location` (met location name) |
 
 Events carry `run` (your trainer id) and `playTime`; `id` is added later by the relay. Kills in doubles use the leftmost live mon and set `ambiguous` when both of yours were alive (the attacker isn't read yet). A jump in play time (loading a savestate or a save) drops the current battle without emitting anything.
 
-Not detected yet: catches, evolutions, trades, and the `sync` snapshot.
+Mons already in the party and boxes when the script starts, or after loading a savestate or save, are treated as known and not sent: the sheet may already have them (hand-entered rows have no id), and `sync` will reconcile them. A mon is sent at most once per timeline, and the sheet ignores a catch for an id it already has. Catching a species you already have is sent as a new mon (and logged); evolution lines are not checked.
+
+Not detected yet: evolutions, trades (a new party mon with another OT id is only logged), and the `sync` snapshot.
 
 ## Lua tests
 
@@ -144,6 +155,16 @@ npm run test:lua      # needs a `lua` interpreter (5.4+) on the PATH
 
 They run the tracker against a fake memory, no emulator or ROM. The scenarios named "observed" replay frame sequences logged from real fights, such as the enemy slot briefly showing a replacement's species with the previous mon's HP during a switch-in.
 
+## Testing in the emulator (remote control)
+
+`lua/dev/remote.lua` and `tools/remote.py` let a script drive a running mGBA: press buttons, take screenshots, save and load states, and log memory every frame. Load `remote.lua` in mGBA once, then send it Lua chunks:
+
+```sh
+python3 tools/remote.py 'press("A"); wait(30); shot("now")'   # screenshot in .remote/now.png
+```
+
+This is how catches, evolutions and PC moves were observed (the traces are in [docs/lua_progress/spike-log.md](docs/lua_progress/spike-log.md)). It is also the basis for checking the tracker against the real game rather than fake memory. Setup, the commands a chunk can use, and how it works are in [tools/README.md](tools/README.md). `tools/state.py` reads the same memory out of saved states without the emulator. In Claude Code, the `remote-controlling-mgba` skill and the `mgba-driver` subagent use these tools.
+
 ## Not built yet
 
-See [DESIGN.md](DESIGN.md): detection of catches, evolutions and trades; the `sync` snapshot; and the local relay that forwards the Lua script's events to the web app.
+See [DESIGN.md](DESIGN.md): detection of evolutions and trades; the `sync` snapshot; and the local relay that forwards the Lua script's events to the web app.

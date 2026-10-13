@@ -12,9 +12,17 @@ Where the mGBA side stands. For the addresses see [../MEMORY_MAP.md](../MEMORY_M
 | `death` | one of your mons faints in any battle (wild or trainer); sent when the battle ends, once per mon |
 | `split` | a gym leader's flag is set after a battle; `badges` is how many of the eight leaders are defeated |
 
+**Catches** (`lua/mons.lua`), confirmed in mGBA on a new game: starter Chimchar sent before the first battle, then six wild catches each sent when their battle ended, the last one (Skitty, with a full party) read from Box 1:
+
+| Source | How |
+|--------|-----|
+| Wild / static catch | the battle ends with `gBattleOutcome = 7`; the enemy mon's personality + OT id is looked up in the party and boxes and read from there (final nickname). Retried for ~10 s if not stored or mid-rewrite |
+| Starter (and any new own-OT mon outside battle) | party scan every 30 frames, out of battle only; a new mon must read the same with a valid checksum on two scans |
+| Already there at start / after a load | recorded as known, not sent |
+
 Supporting modules: `lua/gen3.lua` (party struct decoding, names, flags, play time, run id, ROM check), `lua/addresses.lua`, `lua/json.lua`, `lua/tracker.lua` (mGBA entry point: ROM check, play-time-jump reset, `EVENT {json}` console output).
 
-**Tests:** `npm run test:lua`, 23 scenarios on a fake memory, no emulator needed. Several replay frame sequences logged from real fights. The fake memory models the GBA bus's rotated misaligned reads. The identity check, the per-slot dedupe and the trainer-bit check were each broken on purpose to confirm a test fails.
+**Tests:** `npm run test:lua`, 41 scenarios on a fake memory, no emulator needed. Several replay frame sequences logged from real fights. The fake memory models the GBA bus's rotated misaligned reads. The identity check, the per-slot dedupe and the trainer-bit check were each broken on purpose to confirm a test fails.
 
 ## Behavior worth knowing
 
@@ -24,11 +32,14 @@ Supporting modules: `lua/gen3.lua` (party struct decoding, names, flags, play ti
 - A faint is committed as a `death` when the battle ends. Run & Bun has no overworld fainting, so nothing else is needed.
 - mGBA keeps `require`'s cache between script loads. `tracker.lua` clears its own modules on every load; loading a script does not unload an earlier one (its frame callback keeps running until mGBA restarts).
 
+## Dev tool: driving mGBA from a script
+
+`lua/dev/remote.lua` + `tools/remote.py` drive a running mGBA from a script (buttons, screenshots, savestates, per-frame watchers). See [../../tools/README.md](../../tools/README.md).
+
 ## Not done
 
-- **Captures** (next): scan party + PC boxes for new ids, debounced, with the met location from the game. Needs the PC box address (`gPokemonStorage`, unverified).
-- **Evolutions**: same id, different species between scans.
-- **Trades**: a tracked id replaced by an unknown id with a different OT in the same slot.
+- **Evolutions** (next): same id, different species between party scans. The scan is already there.
+- **Trades**: a new party mon with another OT id is only logged today.
 - **`sync`**: snapshot (mons, defeated trainers, splits, play time) on script start and on any play-time discontinuity, so the sheet can reconcile after savestates.
 - **Relay**: TCP socket from Lua, the local daemon with a disk-backed queue, `id` stamping. Events currently only print to the mGBA console.
 - **Doubles credit**: `gBattlerAttacker` is not located, so doubles kills are credited to the leftmost live mon and flagged `ambiguous`.

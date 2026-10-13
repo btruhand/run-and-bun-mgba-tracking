@@ -8,6 +8,7 @@ local A = require("addresses")
 local G = require("gen3")
 local J = require("json")
 local Battle = require("battle")
+local Mons = require("mons")
 local Fake = require("fakemem")
 
 local failures, passed = 0, 0
@@ -269,6 +270,285 @@ test("starting mid-battle (script loaded during a fight) tracks from the current
   w.begin()
   w.enemy(0, SWIRLIX, 0)
   eq(types(w.events), "kill", "events")
+end)
+
+-- catches -------------------------------------------------------------------------------------------------------------------
+
+local OWN = 0xF9D040AF
+local STARTER = { personality = 0x7578D7BE, species = 393, nick = "Piplup", met_location = 255, level = 5 }
+local POOCH = { personality = 0x971781E7, species = 261, nick = "Poochyena", met_location = 16, level = 3 }
+local POOCH2 = { personality = 0x11223344, species = 261, nick = "Poochyena", met_location = 17, level = 3 }
+local TEAM = {
+  { personality = 0x2EEA2110, species = 390, nick = "Ukiuki", met_location = 255 },
+  { personality = 0xD62A9858, species = 850, nick = "Sizzlipede", met_location = 1 },
+  { personality = 0xFF0FF940, species = 427, nick = "Buneary", met_location = 16 },
+  { personality = 0xFD2AC5D5, species = 16, nick = "Pidgey", met_location = 17 },
+  { personality = 0x6BC3D0FD, species = 664, nick = "Scatterbug", met_location = 18 },
+  { personality = 0x056A2CDA, species = 283, nick = "Surskit", met_location = 0 },
+}
+
+local function with(mon, fields)
+  local c = {}
+  for k, v in pairs(mon) do c[k] = v end
+  for k, v in pairs(fields) do c[k] = v end
+  return c
+end
+
+-- A world for the mon tracker: `party` mons in slots 0.., `boxed` mons in box 1. Nothing is stepped yet, so the
+-- first step() sees this as what was there when tracking started.
+local function mworld(opts)
+  opts = opts or {}
+  local m = Fake.new()
+  for id, name in pairs({ [393] = "Piplup", [261] = "Poochyena", [390] = "Chimchar", [850] = "Sizzlipede" }) do m:species_name(id, name) end
+  m:map_name(16, "Route 101")
+  m:map_name(17, "Route 102")
+  for i, mon in ipairs(opts.party or {}) do m:party_mon(i - 1, mon) end
+  for i, mon in ipairs(opts.boxed or {}) do m:box_mon(1, i - 1, mon) end
+  local w = { mem = m, events = {}, logs = {} }
+  w.mons = Mons.new(m, function(e) w.events[#w.events + 1] = e end, function(s) w.logs[#w.logs + 1] = s end)
+  function w.step(n) for _ = 1, n or 1 do w.mons:step() end end
+  function w.scans(n) w.step(30 * (n or 1)) end
+  function w.battle(enemies) -- a wild battle starts against these enemy party mons
+    for i, e in ipairs(enemies) do m:enemy_mon(i - 1, e) end
+    m:outcome(0)
+    m:in_battle(true)
+    w.step()
+  end
+  function w.end_battle(outcome)
+    m:outcome(outcome)
+    w.step(10)
+    m:in_battle(false)
+    w.step()
+  end
+  function w.logged(pattern)
+    for _, s in ipairs(w.logs) do if s:find(pattern) then return true end end
+    return false
+  end
+  return w
+end
+
+test("the starter is sent once it reads the same on two party scans", function()
+  local w = mworld()
+  w.step()
+  w.mem:party_mon(0, STARTER)
+  w.scans(1)
+  eq(#w.events, 0, "events after one scan")
+  w.scans(1)
+  eq(types(w.events), "catch", "events")
+  local e = w.events[1]
+  eq(e.pid, "0x7578D7BE:0xF9D040AF", "pid")
+  eq(e.species, "Piplup", "species")
+  eq(e.nick, "Piplup", "nick")
+  eq(e.location, "Fateful Encounter", "location")
+  w.scans(10)
+  eq(#w.events, 1, "sent once")
+end)
+
+test("observed: the starter arrives ~130 frames before the first battle and is sent before it starts", function()
+  local w = mworld()
+  w.step(200) -- the starter choice screen, empty party
+  w.mem:party_mon(0, STARTER)
+  w.step(120)
+  w.mem:party_mon(0, with(STARTER, { bad_checksum = true })) -- one frame mid-rewrite as the battle is set up
+  w.step()
+  w.mem:party_mon(0, STARTER)
+  eq(types(w.events), "catch", "sent before the battle")
+  w.mem:in_battle(true)
+  w.step(300)
+  w.mem:outcome(1)
+  w.mem:in_battle(false)
+  w.scans(4)
+  eq(#w.events, 1, "the first battle adds nothing")
+end)
+
+test("mons already in the party and boxes when tracking starts are not sent", function()
+  local w = mworld({ party = TEAM, boxed = { POOCH } })
+  w.scans(5)
+  eq(#w.events, 0, "events")
+  w.mem:party_empty(1) -- a deposit compacts the party: Buneary moves up, Sizzlipede goes to the box
+  w.mem:box_mon(1, 1, TEAM[2])
+  w.scans(3)
+  eq(#w.events, 0, "events after a deposit")
+end)
+
+test("observed: a wild catch with a full party is sent when the battle ends, read from its box slot", function()
+  local w = mworld({ party = TEAM })
+  w.scans(2)
+  w.battle({ POOCH })
+  w.step(600)
+  w.mem:box_mon(1, 0, with(POOCH, { nick = "Pooch" })) -- written after the nickname prompt, still in battle
+  w.end_battle(7)
+  eq(types(w.events), "catch", "events")
+  eq(w.events[1].pid, "0x971781E7:0xF9D040AF", "pid")
+  eq(w.events[1].species, "Poochyena", "species")
+  eq(w.events[1].nick, "Pooch", "nickname from the stored copy")
+  eq(w.events[1].location, "Route 101", "location")
+  w.scans(5)
+  eq(#w.events, 1, "sent once")
+end)
+
+test("a wild catch into a free party slot is sent once, with the nickname given after the catch", function()
+  local w = mworld({ party = { TEAM[1] } })
+  w.scans(1)
+  w.battle({ POOCH })
+  w.mem:party_mon(1, POOCH) -- added at "Gotcha!", nickname not chosen yet
+  w.step(400)
+  w.mem:party_mon(1, with(POOCH, { nick = "Fang" }))
+  w.end_battle(7)
+  w.scans(5)
+  eq(types(w.events), "catch", "events")
+  eq(w.events[1].nick, "Fang", "nick")
+end)
+
+test("a battle that ends won or ran sends no catch", function()
+  local w = mworld({ party = { TEAM[1] } })
+  w.battle({ POOCH })
+  w.end_battle(1)
+  w.battle({ POOCH2 })
+  w.end_battle(4)
+  w.scans(3)
+  eq(#w.events, 0, "events")
+end)
+
+test("frames where a mon is being rewritten never make a catch", function()
+  local w = mworld({ party = TEAM })
+  w.mem:party_mon(0, with(TEAM[1], { bad_checksum = true, species = 17845 })) -- a known mon read mid-rewrite
+  w.scans(3)
+  eq(#w.events, 0, "known mon")
+  local w2 = mworld()
+  w2.step()
+  w2.mem:party_mon(0, with(STARTER, { bad_checksum = true }))
+  w2.scans(3)
+  eq(#w2.events, 0, "new mon, unreadable")
+  w2.mem:party_mon(0, STARTER)
+  w2.scans(2)
+  eq(types(w2.events), "catch", "new mon once readable")
+end)
+
+test("a known mon that is briefly in neither the party nor a box is not a catch when it comes back", function()
+  local w = mworld({ party = { TEAM[1] }, boxed = { TEAM[2] } })
+  w.scans(1)
+  w.mem:box_empty(1, 0) -- withdraw: the box slot empties ~47 frames before the party slot fills
+  w.scans(2)
+  w.mem:party_mon(1, TEAM[2])
+  w.scans(3)
+  eq(#w.events, 0, "events")
+end)
+
+test("the same mon is sent at most once; another mon of the same species is a new catch", function()
+  local w = mworld({ party = { TEAM[1] } })
+  w.battle({ POOCH })
+  w.mem:party_mon(1, POOCH)
+  w.end_battle(7)
+  w.mem:party_empty(1) -- deposited, then withdrawn again
+  w.mem:box_mon(1, 0, POOCH)
+  w.scans(2)
+  w.mem:box_empty(1, 0)
+  w.mem:party_mon(1, POOCH)
+  w.scans(2)
+  eq(#w.events, 1, "same mon")
+  w.battle({ POOCH2 })
+  w.mem:box_mon(1, 0, POOCH2)
+  w.end_battle(7)
+  eq(types(w.events), "catch,catch", "another Poochyena")
+  eq(w.events[2].pid, "0x11223344:0xF9D040AF", "second pid")
+  eq(w.logged("another Poochyena"), true, "repeat species logged")
+end)
+
+test("after a savestate load the mons in it are known; a catch replayed after the load is sent again", function()
+  local w = mworld({ party = { TEAM[1] } })
+  w.battle({ POOCH })
+  w.mem:party_mon(1, POOCH)
+  w.end_battle(7)
+  w.mons:reset() -- loaded a later state that already has the Poochyena: nothing to send
+  w.scans(3)
+  eq(#w.events, 1, "known after load")
+  w.mem:party_empty(1)
+  w.mons:reset() -- loaded a state from before the catch, and caught it again
+  w.battle({ POOCH })
+  w.mem:party_mon(1, POOCH)
+  w.end_battle(7)
+  eq(types(w.events), "catch,catch", "sent again (the sheet ignores the repeat id)")
+end)
+
+test("a caught mon that never shows up is given up on without an event", function()
+  local w = mworld({ party = { TEAM[1] } })
+  w.battle({ POOCH })
+  w.end_battle(7)
+  w.scans(25)
+  eq(#w.events, 0, "events")
+  eq(w.logged("not in the party or boxes"), true, "logged")
+  eq(w.mons.lookups, nil, "stopped looking")
+end)
+
+test("a new party mon with another OT id (an in-game trade) is logged once, not sent as a catch", function()
+  local w = mworld({ party = { TEAM[1] } })
+  w.scans(1)
+  w.mem:party_mon(1, with(POOCH, { ot_id = 0x12345678 }))
+  w.scans(5)
+  eq(#w.events, 0, "events")
+  local n = 0
+  for _, s in ipairs(w.logs) do if s:find("another OT id") then n = n + 1 end end
+  eq(n, 1, "logged once")
+end)
+
+test("an egg is not sent until it hatches", function()
+  local w = mworld({ party = { TEAM[1] } })
+  w.scans(1)
+  w.mem:party_mon(1, with(POOCH, { egg = true }))
+  w.scans(4)
+  eq(#w.events, 0, "egg")
+  w.mem:party_mon(1, POOCH)
+  w.scans(2)
+  eq(types(w.events), "catch", "hatched")
+end)
+
+test("a tracker started mid-battle still sends the catch", function()
+  local w = mworld({ party = TEAM })
+  for i, e in ipairs({ POOCH }) do w.mem:enemy_mon(i - 1, e) end
+  w.mem:in_battle(true)
+  w.step(5)
+  w.mem:box_mon(1, 0, POOCH)
+  w.end_battle(7)
+  eq(types(w.events), "catch", "events")
+end)
+
+test("a caught mon read mid-rewrite when the battle ends is sent on a later scan with its real data", function()
+  local w = mworld({ party = TEAM })
+  w.battle({ POOCH })
+  w.mem:box_mon(1, 0, with(POOCH, { nick = "Pooch", species = 46918, bad_checksum = true }))
+  w.end_battle(7)
+  eq(#w.events, 0, "not sent while unreadable")
+  w.mem:box_mon(1, 0, with(POOCH, { nick = "Pooch" }))
+  w.scans(1)
+  eq(types(w.events), "catch", "events")
+  eq(w.events[1].species, "Poochyena", "species")
+end)
+
+test("a catch already stored when tracking (re)started is not sent at the battle's end", function()
+  local w = mworld({ party = TEAM, boxed = { POOCH } }) -- e.g. a state loaded after the nickname prompt
+  for i, e in ipairs({ POOCH }) do w.mem:enemy_mon(i - 1, e) end
+  w.mem:in_battle(true)
+  w.step(5)
+  w.end_battle(7)
+  w.scans(3)
+  eq(#w.events, 0, "events")
+end)
+
+test("box slots decode with the 80-byte layout and a failed checksum marks a mon unreadable", function()
+  local m = Fake.new()
+  m:box_mon(3, 7, POOCH)
+  local mon = G.read_mon(m, m:box_addr(3, 7), true)
+  eq(mon.species, 261, "species")
+  eq(mon.valid, true, "valid")
+  eq(mon.level, nil, "no level in a box")
+  m:box_mon(3, 7, with(POOCH, { bad_checksum = true }))
+  eq(G.read_mon(m, m:box_addr(3, 7), true).valid, false, "bad checksum")
+  eq(G.storage(m), 0x2028848, "storage")
+end)
+
+test("met locations past the map table read as empty", function()
+  eq(G.map_name(Fake.new(), 254), "", "254")
 end)
 
 -- decoding ------------------------------------------------------------------------------------------------------------------

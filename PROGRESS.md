@@ -1,6 +1,6 @@
 # Progress
 
-Last updated 2026-10-10. The design is in [DESIGN.md](DESIGN.md); the Lua details are in [docs/lua_progress/](docs/lua_progress/README.md).
+Last updated 2026-10-11. The design is in [DESIGN.md](DESIGN.md); the Lua details are in [docs/lua_progress/](docs/lua_progress/README.md).
 
 Legend: `[x]` done and checked, `[~]` done but only partly checked (noted), `[ ]` not started.
 "Live" means confirmed in mGBA during play. "Dev sheet" means confirmed on the copy of the spreadsheet, not the real one.
@@ -14,11 +14,11 @@ mGBA (Lua tracker) ──NDJSON/TCP──▶ relay (not built) ──HTTPS──
 
 | Area | State |
 |------|-------|
-| Game data (RAM / ROM map) | Party, battle, flags, names found. PC boxes and doubles attacker still open |
-| Lua tracker | Battles done and live (kills, deaths, splits). Captures, evolutions, trades, `sync`, output to the relay not started |
+| Game data (RAM / ROM map) | Party, battle, flags, names, PC boxes and screen ids found; catch and evolution behavior observed live. Doubles attacker still open |
+| Lua tracker | Battles (kills, deaths, splits) and catches including the starter done and live. Evolutions, trades, `sync`, output to the relay not started |
 | Relay | Not started |
 | Apps Script / sheet | Web app, journal and reconcile done and tested on the dev sheet. Not on the real sheet |
-| Testing | Sheet tests (13) and Lua tests (23) pass. No emulator-in-the-loop or end-to-end test |
+| Testing | Sheet tests (13) and Lua tests (41) pass. Remote control for in-emulator checks exists; no automated emulator-in-the-loop or end-to-end test |
 | Rollout to the real sheet | Not started |
 
 ## 1. Game data (RAM / ROM)
@@ -30,10 +30,13 @@ Details: [docs/MEMORY_MAP.md](docs/MEMORY_MAP.md), method in [docs/lua_progress/
 - [x] `gMain.inBattle`, `gBattleTypeFlags`, `gBattleMons` and its fields, opponent trainer id (live)
 - [x] Trainer-defeated flags (live), RAM id ↔ `gTrainers` entry offset (four trainers)
 - [x] ROM tables: species names, `gTrainers`, map section names (map names checked on savestates only)
-- [ ] PC boxes: `gPokemonStorage` (the community exporter's `0x02028848` is unchecked). Needs a state with mons in boxes
+- [x] PC boxes: `gPokemonStoragePtr` `0x03005da4` → `0x02028848`, vanilla layout (live)
+- [x] `gMain.callback2` screen ids (overworld, bag, party menu, evolution, PC, battle) (live)
+- [x] Catch, evolution and PC moves traced frame by frame: in-place decryption makes a failed-checksum frame, party count goes stale, party compacts, mons are briefly in neither party nor box (live)
 - [ ] `gBattlerAttacker`, to credit doubles kills exactly
 - [ ] Gym leader ids confirmed against a real leader fight (derived from the table so far)
-- Skipped on purpose: badge flags (the split comes from leader flags), `gBattleOutcome`, `gBattlerPartyIndexes`
+- [x] `gBattleOutcome` `0x02023716`: won 1, ran 4, caught 7; kept after the battle (live + savestates)
+- Skipped on purpose: badge flags (the split comes from leader flags), `gBattlerPartyIndexes`
 
 ## 2. Lua tracker (`lua/`)
 
@@ -45,9 +48,10 @@ Details: [docs/MEMORY_MAP.md](docs/MEMORY_MAP.md), method in [docs/lua_progress/
   - [x] `split`: gym leader flags set after a battle (tests only; no leader win seen live yet)
   - [~] Doubles: leftmost live mon credited, `ambiguous` flagged (tests only)
   - [ ] Blackout (whole party wiped) in a wild fight, not seen live
-- [ ] **Captures**: scan party and PC boxes for new ids, debounce (2+ scans, skip transitions), species / nickname / met location, gifts and starter included
+- [x] **Catches** (`mons.lua`): battle ends with outcome caught → the mon is looked up in party / boxes; outside battle a new own-OT party mon read the same on two scans with a valid checksum (the starter). Mons present at start or after a load are known, not sent (live: new game → starter Chimchar sent before the first battle, then a wild Starly on Route 102 sent when the battle ended)
+  - [x] A catch with a full party goes to a box and is sent from there (live: Skitty as the seventh mon)
 - [ ] **Evolutions**: same id, different species between scans
-- [ ] **Trades**: tracked id replaced by an unknown id with a different OT in the same slot
+- [ ] **Trades**: tracked id replaced by an unknown id with a different OT in the same slot. In Run & Bun gift mons come from NPC trades, so they always land in the party (no gift-to-PC case). To check on a real trade: the met location (vanilla uses 254, "in-game trade", which the map table doesn't cover) and the slot transition on the trade screen
 - [ ] **`sync`**: snapshot of mons, defeated trainers, splits and play time on script start and on any play-time discontinuity (today a jump only resets the battle tracker silently)
 - [ ] New-run detection (a different trainer id) and what the script does about it
 - [ ] Output to the relay: socket client with reconnect (mGBA 0.10.3's `socket` API is not yet verified)
@@ -83,11 +87,13 @@ Done and tested on the **dev copy** only.
 ## 5. Testing and tooling
 
 - [x] `npm run test:sheet`: 13 scenarios against the dev web app (~2 min)
-- [x] `npm run test:lua`: 23 scenarios on a fake memory, no emulator (mutation-checked)
+- [x] `npm run test:lua`: 41 scenarios on a fake memory, no emulator (mutation-checked, including the catch rules)
 - [x] `setup-clasp`, `gen-token`, `deploy:dev`
 - [x] Read-only probes `lua/spike/probe.lua`, `probe2.lua`
-- [ ] Tests for captures, evolutions, trades and `sync` as they are written
-- [ ] Emulator-in-the-loop test: mGBA with the ROM and a fixture state, assert on the emitted events (needs the 0.10.3 CLI flags)
+- [x] Remote control `lua/dev/remote.lua` + `tools/remote.py`: buttons, screenshots, savestates and watchers from a script (live)
+- [x] Tests for catches
+- [ ] Tests for evolutions, trades and `sync` as they are written
+- [ ] Emulator-in-the-loop test: mGBA with the ROM and a fixture state, assert on the emitted events. 0.10.3 has no `--script` flag, but the remote can load states and drive the game once loaded
 - [ ] End-to-end test: Lua output → relay → dev web app → sheet
 - [ ] `tools/replay.py` to post recorded event streams (from the design; may not be needed)
 
@@ -106,7 +112,7 @@ Done and tested on the **dev copy** only.
 
 ## Suggested order
 
-1. PC box address (needs a state with boxed mons), then **captures**
+1. **Catches** done and live
 2. **Evolutions** and **trades** (same party and box scan)
 3. **`sync`** and new-run handling
 4. **Relay**, plus the Lua socket output; first end-to-end run against the dev sheet

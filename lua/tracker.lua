@@ -5,11 +5,12 @@ local dir = debug.getinfo(1, "S").source:match("^@(.*[/\\])") or TRACKER_DIR or 
 package.path = dir .. "?.lua;" .. package.path
 
 -- mGBA keeps `require`'s cache between script loads, so a reload would silently reuse old modules.
-for _, name in ipairs({ "addresses", "gen3", "json", "battle" }) do package.loaded[name] = nil end
+for _, name in ipairs({ "addresses", "gen3", "json", "battle", "mons" }) do package.loaded[name] = nil end
 
 local G = require("gen3")
 local J = require("json")
 local Battle = require("battle")
+local Mons = require("mons")
 
 local function log(msg) console:log(msg) end
 
@@ -29,6 +30,7 @@ local function emit(ev)
 end
 
 local battle = Battle.new(emu, emit, function(msg) log("battle: " .. msg) end)
+local mons = Mons.new(emu, emit, function(msg) log("mons: " .. msg) end)
 
 local function on_frame()
   local pt = G.play_time(emu)
@@ -36,9 +38,11 @@ local function on_frame()
   if play_time and (pt < play_time or pt > play_time + JUMP) then
     log(string.format("play time jumped %d -> %d (savestate or save loaded)", play_time, pt))
     battle:reset()
+    mons:reset()
   end
   play_time = pt
   battle:step()
+  mons:step()
 end
 
 if TRACKER_CB then callbacks:remove(TRACKER_CB) end

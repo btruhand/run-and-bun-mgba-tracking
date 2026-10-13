@@ -34,25 +34,42 @@ function G.pid_string(personality, ot_id)
   return string.format("0x%08X:0x%08X", personality, ot_id)
 end
 
--- A Pokémon struct (party layout, 100 bytes). Returns nil for an empty slot.
-function G.read_mon(mem, addr)
+-- The substruct checksum (u16 at +28) is the sum of the 48 decrypted bytes taken as u16s. The game decrypts a mon
+-- in place while it works on it, so for single frames the substructs are garbage and this fails.
+function G.checksum_ok(mem, addr)
+  local key, sum = mem:read32(addr) ~ mem:read32(addr + 4), 0
+  for i = 0, 11 do
+    local w = mem:read32(addr + 32 + i * 4) ~ key
+    sum = sum + (w & 0xFFFF) + (w >> 16)
+  end
+  return sum & 0xFFFF == mem:read16(addr + 28)
+end
+
+-- A Pokémon struct (party layout, 100 bytes; `box` for the 80-byte PC layout, which has no level or HP).
+-- Returns nil for an empty slot. `valid` is false while the game is rewriting it (see G.checksum_ok); species,
+-- nickname and met location are only meaningful when it is true. Identity (`pid`) is always readable.
+function G.read_mon(mem, addr, box)
   local pid, ot = mem:read32(addr), mem:read32(addr + 4)
   if pid == 0 and ot == 0 then return nil end
   local key = pid ~ ot
   local perm = PERM[pid % 24 + 1]
   local function word(substruct, i) return mem:read32(addr + 32 + perm[substruct + 1] * 12 + i * 4) ~ key end
   local misc0 = word(3, 0)
-  return {
+  local flags = mem:read8(addr + 19) -- bit 0 bad egg, bit 1 has species, bit 2 egg
+  local m = {
     personality = pid,
     ot_id = ot,
     pid = G.pid_string(pid, ot),
     species = word(0, 0) & 0xFFFF,
     nick = G.decode_string(mem, addr + 8, 10),
     met_location = (misc0 >> 8) & 0xFF,
-    level = mem:read8(addr + 84),
-    hp = mem:read16(addr + 86),
-    max_hp = mem:read16(addr + 88),
+    egg = flags & 0x04 ~= 0,
+    valid = flags & 0x03 == 0x02 and G.checksum_ok(mem, addr),
   }
+  if not box then
+    m.level, m.hp, m.max_hp = mem:read8(addr + 84), mem:read16(addr + 86), mem:read16(addr + 88)
+  end
+  return m
 end
 
 -- gBattleMons[b]: the fields the battle tracker needs, read raw (no decoding).
@@ -79,6 +96,7 @@ end
 
 function G.map_name(mem, id)
   if id == 255 then return "Fateful Encounter" end
+  if id >= A.map_count then return "" end
   local ptr = mem:read32(A.map_names + id * 8 + 4)
   if ptr < 0x08000000 or ptr >= 0x0a000000 then return "" end
   return G.decode_string(mem, ptr, 30)
@@ -112,13 +130,24 @@ function G.play_time(mem)
   return mem:read16(s + A.sb2_play_time) * 3600 + mem:read8(s + A.sb2_play_time + 2) * 60 + mem:read8(s + A.sb2_play_time + 3)
 end
 
--- Identifies the save (trainer id + secret id), or nil before a save is loaded.
-function G.run_id(mem)
+-- The player's trainer id + secret id (u32, the OT id of mons you caught), or nil before a save is loaded.
+function G.trainer_id(mem)
   local s = sb(mem, A.sb2_ptr)
   if not s then return nil end
   -- The id sits at a 2-byte aligned offset, and a misaligned read32 returns a rotated word on the GBA bus.
   local o = s + A.sb2_trainer_id
-  return string.format("0x%08X", mem:read16(o) | mem:read16(o + 2) << 16)
+  return mem:read16(o) | mem:read16(o + 2) << 16
+end
+
+-- Identifies the save (trainer id + secret id), or nil before a save is loaded.
+function G.run_id(mem)
+  local id = G.trainer_id(mem)
+  return id and string.format("0x%08X", id)
+end
+
+-- Address of the PC storage (gPokemonStorage), or nil before a save is loaded.
+function G.storage(mem)
+  return sb(mem, A.storage_ptr)
 end
 
 -- True if the loaded ROM looks like the 1.0.7 the addresses were found for.

@@ -15,14 +15,21 @@ return {
   opponent_a   = 0x20381ae,          -- gTrainerBattleOpponent_A (u16); NOT cleared after a battle
   battle_mons  = 0x20233fc,
   battle_mon_size = 0x5c,
+  battle_outcome = 0x2023716,        -- gBattleOutcome (u8): 1 won, 4 ran, 7 caught; kept after the battle
   bm = { species = 0x00, hp = 0x2a, level = 0x2c, max_hp = 0x2e, personality = 0x4c, ot_id = 0x58 },
 
   -- save blocks (pointers, dereference on every read)
   sb1_ptr = 0x3005d9c,
   sb2_ptr = 0x3005da0,
+  storage_ptr = 0x3005da4, -- gPokemonStoragePtr (PC boxes)
   sb2_trainer_id = 0x0a,   -- u32: trainer id | secret id << 16, equals the OT id of your own mons
   sb2_play_time  = 0x0e,   -- u16 hours, u8 minutes, u8 seconds
   trainer_flags  = 0x16b4, -- sb1 offset of the trainer-defeated flag for trainer id 0
+
+  -- PC boxes (offsets from the storage pointer's target)
+  box_mons     = 4,     -- 14 boxes * 30 slots, box-major
+  box_slots    = 14 * 30,
+  box_mon_size = 80,
 
   -- ROM tables
   species_names  = 0x083a0f80, -- 11 bytes per name, indexed by species id
@@ -31,6 +38,7 @@ return {
   trainer_count  = 865,
   trainer_entry_offset = 1,    -- gTrainers entry = RAM trainer id + 1 (checked on four trainers)
   map_names      = 0x086a1960, -- 8-byte entries, name pointer at +4, indexed by met location
+  map_count      = 213,
 
   -- RAM trainer ids of the eight gym leaders (Roxanne .. Juan); the split is how many of these are defeated
   gym_leaders = { 264, 265, 266, 267, 268, 269, 270, 271 },

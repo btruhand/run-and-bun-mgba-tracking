@@ -7,3 +7,4 @@ fixtures/private/
 .build
 .clasp.json
 .clasp.dev.json
+.remote/
