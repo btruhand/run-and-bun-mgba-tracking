@@ -8,3 +8,5 @@ fixtures/private/
 .clasp.json
 .clasp.dev.json
 .remote/
+
+.DS_Store
