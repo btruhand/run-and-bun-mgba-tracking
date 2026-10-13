@@ -54,7 +54,7 @@ Details: [docs/MEMORY_MAP.md](docs/MEMORY_MAP.md), method in [docs/lua_progress/
   - [x] Web app: `evolve` sets the nickname when `nick` is sent, and its undo puts it back (dev sheet)
 - [ ] **Trades**: tracked id replaced by an unknown id with a different OT in the same slot. In Run & Bun gift mons come from NPC trades, so they always land in the party (no gift-to-PC case). To check on a real trade: the met location (vanilla uses 254, "in-game trade", which the map table doesn't cover) and the slot transition on the trade screen
 - [ ] **`sync`**: snapshot of mons, defeated trainers, splits and play time on script start and on any play-time discontinuity (today a jump only resets the battle tracker silently)
-- [ ] New-run detection (a different trainer id) and what the script does about it
+- Not needed: new-run detection. Starting a new run is manual (Reset Run on the sheet); the Lua side just sends events with the current trainer id as `run`
 - [ ] Output to the relay: socket client with reconnect (mGBA 0.10.3's `socket` API is not yet verified)
 - [ ] Cheaper battle reads (fetch HP first, the rest only on change). Optional; do it with the party scans
 - [ ] Doubles: use `gBattlerAttacker` once found, then drop `ambiguous`
@@ -102,7 +102,7 @@ Done and tested on the **dev copy** only.
 
 - [ ] Deploy the web app to the real sheet (`clasp` prod file, Script Properties `TOKEN`, no `ENV=dev`) and approve its permissions once
 - [ ] Run with the relay against the real sheet for a few battles; compare with manual counts
-- [ ] Decide how to start a new run (Reset Run, then the first `sync`)
+- [x] Decided how to start a new run: press Reset Run (clears `Rankings`, `_Events`, `_Issues` and the tracked run); the first event after it sets the new run
 - [ ] Play a full split live and fix attribution problems
 
 ## 7. Docs
@@ -115,7 +115,7 @@ Done and tested on the **dev copy** only.
 
 1. **Catches** done and live
 2. **Evolutions** done; **trades** next (same party scan)
-3. **`sync`** and new-run handling
+3. **`sync`**
 4. **Relay**, plus the Lua socket output; first end-to-end run against the dev sheet
 5. Roll out to the real sheet; first real leader win confirms the `split` flow
 6. Doubles attacker and polish

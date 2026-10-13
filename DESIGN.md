@@ -204,7 +204,7 @@ So only kills (and deaths of boxed mons) depend on remembered history. Everythin
 
 ## Edge cases / risks
 
-- **New run.** Never auto-reset. Events from a new trainer id are held; you press Reset Run. (What the Lua side does on a new run is still open.)
+- **New run.** Started by hand: press Reset Run, which clears `Rankings`, `_Events`, `_Issues` and the tracked run; the first event after it sets the new run. The Lua side doesn't detect new runs; it just sends the current trainer id as `run`. Events from another run before the reset are held (logged to `_Issues`, not applied), so press Reset Run before picking the starter; a later `sync` adds any mon that was missed.
 - **Relay down / offline.** Lua reconnects; the relay queues to disk; ids dedupe; play-time ordering keeps rollback correct when delayed events arrive in order.
 - **Apps Script quotas/latency.** A handful of events per battle; each request takes a few seconds; the relay batches.
 - **Odd moves** (Pursuit, Future Sight, Perish Song) in doubles may be credited to the wrong mon until the attacker is read; `ambiguous` marks the doubles cases.
@@ -255,6 +255,6 @@ Secrets/config (`.env`, gitignored): dev web-app URL, shared token, deployment i
 
 - `gBattlerAttacker`, for exact doubles credit and the `indirect` flag.
 - Trades: the met location of a traded mon and the slot behavior on the trade screen.
-- `sync` from Lua, and what the script does on a new run.
+- `sync` from Lua.
 - The relay and the Lua socket output (mGBA 0.10.3's `socket` API not verified yet).
 - The first real gym leader win, to confirm the leader ids and the `split` flow.
