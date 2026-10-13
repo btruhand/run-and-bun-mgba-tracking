@@ -1,5 +1,6 @@
--- Mon tracker: catches, including the starter. Call step() every frame; it emits through emit(event):
+-- Mon tracker: catches (including the starter) and evolutions. Call step() every frame; it emits through emit(event):
 --   catch  {pid, species, nick, location}   a mon joined you (party or PC box)
+--   evolve {pid, from, to, nick?}           a known party mon changed species; nick only if the game renamed it
 -- `mem` is anything with read8/read16/read32/readRange (mGBA's emu, or a fake in tests).
 -- Event ids, run and play time are added by the caller.
 --
@@ -10,6 +11,12 @@
 --  * Outside battle, a party scan every SCAN_EVERY frames: a mon not seen before, with your OT id, read the same
 --    with a valid checksum on two scans in a row. This is the starter (given by script before the first battle).
 --    In-game trades also land in the party, but with another OT id; they are logged and left for the trade code.
+--
+-- Evolutions come from the same party scan: a known mon whose species differs from its last valid read, with the
+-- new species read the same with a valid checksum on two scans in a row. Mons only evolve in the party (after a
+-- battle, or from an item), so boxes are not watched. The game renames a mon that still has its species name
+-- (Scatterbug -> Spewpa) on the same frame as the species; that new name goes in `nick`. A change that keeps the
+-- species name (a form change) is only logged.
 --
 -- Mons already there when tracking starts, or after a savestate / save load (reset), are recorded as known
 -- without emitting anything: the sheet may already have them (rows entered by hand have no id, so a catch would
@@ -36,10 +43,12 @@ end
 -- Forget what was seen (play time jumped: a savestate or save was loaded). The next step re-reads the party and
 -- boxes as known, silently.
 function M:reset()
-  self.known = nil      -- pid -> true, mons that need no catch event; nil until seeded
+  self.known = nil      -- pid -> {species, nick} from the last valid read (empty until one), mons that need no
+                        -- catch event; nil until seeded
   self.foreign = {}     -- pid -> true, mons with another OT id already logged
   self.species = {}     -- species id -> true, for the repeated-species note
   self.pending = {}     -- pid -> species, new party mons waiting for a second matching scan
+  self.evolving = {}    -- pid -> species, known party mons with a new species waiting for a second matching scan
   self.lookups = nil    -- caught enemy mons not found in the party or boxes yet: { ids = {pid...}, tries }
   self.enemies = nil    -- enemy party ids captured when the battle started
   self.in_battle = nil
@@ -70,8 +79,11 @@ function M:seed()
   local n = 0
   self:each_slot(function(a, box)
     local m = G.read_mon(self.mem, a, box)
-    self.known[m.pid] = true
-    if m.valid then self.species[m.species] = true end
+    self.known[m.pid] = {}
+    if m.valid and not m.egg then
+      self.known[m.pid] = { species = m.species, nick = m.nick }
+      self.species[m.species] = true
+    end
     n = n + 1
   end)
   self.log(string.format("%d mons already in the party and boxes (not sent)", n))
@@ -89,7 +101,7 @@ function M:enemy_ids()
 end
 
 function M:caught(m)
-  self.known[m.pid] = true
+  self.known[m.pid] = { species = m.species, nick = m.nick }
   local species = G.species_name(self.mem, m.species)
   if self.species[m.species] then self.log("note: another " .. species .. " (" .. m.pid .. "); sending it as a new mon") end
   self.species[m.species] = true
@@ -142,17 +154,43 @@ function M:look_up()
   end
 end
 
+-- A valid, non-egg party read of a known mon `k`: records its species and nickname, or sends the evolution once
+-- the new species has read the same on two scans.
+function M:check_species(k, m)
+  if k.species == nil or k.species == m.species then
+    self.evolving[m.pid] = nil
+    k.species, k.nick = m.species, m.nick -- first valid read, or a rename (Name Rater): nothing to send
+    return
+  end
+  if self.evolving[m.pid] ~= m.species then
+    self.evolving[m.pid] = m.species -- first sighting (or it changed): wait for the next scan
+    return
+  end
+  self.evolving[m.pid] = nil
+  local from, to = G.species_name(self.mem, k.species), G.species_name(self.mem, m.species)
+  if from == to then
+    self.log(string.format("%s (%s) changed form (%d -> %d); not sent", to, m.pid, k.species, m.species))
+  else
+    self.emit({ type = "evolve", pid = m.pid, from = from, to = to, nick = m.nick ~= k.nick and m.nick or nil })
+  end
+  self.species[m.species] = true
+  k.species, k.nick = m.species, m.nick
+end
+
 function M:scan()
   local mem = self.mem
   if self.lookups then self:look_up() end -- first, so a caught mon found here is known before the party loop
   local raw = mem:readRange(A.party, 6 * A.mon_size)
-  if raw == self.last_party and next(self.pending) == nil then return end
+  if raw == self.last_party and next(self.pending) == nil and next(self.evolving) == nil then return end
   self.last_party = raw
   local here = {}
   for i = 0, 5 do
     local m = G.read_mon(mem, A.party + i * A.mon_size)
-    if m and not self.known[m.pid] and not self.foreign[m.pid] then
-      here[m.pid] = true
+    if m then here[m.pid] = true end
+    local k = m and self.known[m.pid]
+    if k then
+      if m.valid and not m.egg then self:check_species(k, m) end
+    elseif m and not self.foreign[m.pid] then
       if m.valid and not m.egg then
         if self.pending[m.pid] ~= m.species then
           self.pending[m.pid] = m.species -- first sighting (or it changed): wait for the next scan
@@ -167,8 +205,10 @@ function M:scan()
       end
     end
   end
-  for pid in pairs(self.pending) do
-    if not here[pid] then self.pending[pid] = nil end
+  for _, waiting in ipairs({ self.pending, self.evolving }) do
+    for pid in pairs(waiting) do
+      if not here[pid] then waiting[pid] = nil end
+    end
   end
 end
 

@@ -220,8 +220,15 @@ function applyForward_(ctx, ev) {
       row = findRowById(sheet, ev.pid);
       if (!row) return {error: 'evolve for unknown pid ' + ev.pid};
       sheet.getRange(row, COL.SPECIES).setValue(ev.to);
+      var inverse = {op: 'setSpecies', pid: ev.pid, species: ev.from, onlyIf: ev.to};
+      if (ev.nick) { // the game renamed a mon that still had its species name
+        var nickCell = sheet.getRange(row, COL.NICK);
+        inverse.nick = nickCell.getValue();
+        inverse.nickIf = ev.nick;
+        nickCell.setValue(ev.nick);
+      }
       ctx.mutated = true;
-      return {inverse: {op: 'setSpecies', pid: ev.pid, species: ev.from, onlyIf: ev.to}};
+      return {inverse: inverse};
     }
     case 'trade': {
       row = findRowById(sheet, ev.old_pid);
@@ -294,6 +301,11 @@ function applyInverse_(ctx, inv, ev) {
         return;
       }
       sp.setValue(inv.species);
+      if (inv.nickIf !== undefined) {
+        var nick = sheet.getRange(row, COL.NICK);
+        if (nick.getValue() === inv.nickIf) nick.setValue(inv.nick);
+        else logIssue_(ctx, 'skipped undo: nickname of ' + inv.pid + ' was edited', ev);
+      }
       ctx.mutated = true;
       return;
     }

@@ -299,7 +299,7 @@ end
 local function mworld(opts)
   opts = opts or {}
   local m = Fake.new()
-  for id, name in pairs({ [393] = "Piplup", [261] = "Poochyena", [390] = "Chimchar", [850] = "Sizzlipede" }) do m:species_name(id, name) end
+  for id, name in pairs({ [393] = "Piplup", [261] = "Poochyena", [390] = "Chimchar", [850] = "Sizzlipede", [664] = "Scatterbug", [665] = "Spewpa", [666] = "Vivillon", [10250] = "Vivillon" }) do m:species_name(id, name) end
   m:map_name(16, "Route 101")
   m:map_name(17, "Route 102")
   for i, mon in ipairs(opts.party or {}) do m:party_mon(i - 1, mon) end
@@ -532,6 +532,118 @@ test("a catch already stored when tracking (re)started is not sent at the battle
   w.step(5)
   w.end_battle(7)
   w.scans(3)
+  eq(#w.events, 0, "events")
+end)
+
+-- evolutions -------------------------------------------------------------------------------------------------------------
+
+local SCATTERBUG = TEAM[5]
+
+test("observed: an evolution is sent once, with the default nickname the game gave the new species", function()
+  local w = mworld({ party = TEAM })
+  w.scans(2)
+  w.mem:party_mon(4, with(SCATTERBUG, { level = 9 })) -- Endless Candy, L9
+  w.scans(4)                                           -- the evolution scene
+  w.mem:party_mon(4, with(SCATTERBUG, { species = 46919, bad_checksum = true, level = 9 })) -- one frame mid-write
+  w.step()
+  w.mem:party_mon(4, with(SCATTERBUG, { species = 665, nick = "Spewpa", level = 9 }))
+  w.scans(1)
+  eq(#w.events, 0, "not sent after one scan")
+  w.scans(1)
+  eq(types(w.events), "evolve", "events")
+  local e = w.events[1]
+  eq(e.pid, "0x6BC3D0FD:0xF9D040AF", "pid")
+  eq(e.from, "Scatterbug", "from")
+  eq(e.to, "Spewpa", "to")
+  eq(e.nick, "Spewpa", "nick")
+  w.scans(10)
+  eq(#w.events, 1, "sent once")
+end)
+
+test("a nicknamed mon evolves without a nick in the event", function()
+  local w = mworld({ party = { with(SCATTERBUG, { nick = "Dusty" }) } })
+  w.scans(1)
+  w.mem:party_mon(0, with(SCATTERBUG, { species = 665, nick = "Dusty" }))
+  w.scans(2)
+  eq(types(w.events), "evolve", "events")
+  eq(w.events[1].nick, nil, "nick")
+end)
+
+test("a mon caught this session, then evolved, sends catch then evolve", function()
+  local w = mworld({ party = { TEAM[1] } })
+  w.battle({ SCATTERBUG })
+  w.mem:party_mon(1, SCATTERBUG)
+  w.end_battle(7)
+  w.scans(2)
+  w.mem:party_mon(1, with(SCATTERBUG, { species = 665, nick = "Spewpa" }))
+  w.scans(2)
+  eq(types(w.events), "catch,evolve", "events")
+  eq(w.events[2].from, "Scatterbug", "from")
+end)
+
+test("a boxed mon withdrawn and then evolved is sent", function()
+  local w = mworld({ party = { TEAM[1] }, boxed = { SCATTERBUG } })
+  w.scans(1)
+  w.mem:box_empty(1, 0)
+  w.mem:party_mon(1, SCATTERBUG)
+  w.scans(2)
+  w.mem:party_mon(1, with(SCATTERBUG, { species = 665, nick = "Spewpa" }))
+  w.scans(2)
+  eq(types(w.events), "evolve", "events")
+end)
+
+test("a species read on only one scan, or with a failed checksum, is not an evolution", function()
+  local w = mworld({ party = TEAM })
+  w.scans(1)
+  w.mem:party_mon(4, with(SCATTERBUG, { species = 665 })) -- one scan only, then back
+  w.scans(1)
+  w.mem:party_mon(4, SCATTERBUG)
+  w.scans(3)
+  w.mem:party_mon(4, with(SCATTERBUG, { species = 17845, bad_checksum = true }))
+  w.scans(5)
+  eq(#w.events, 0, "events")
+end)
+
+test("a mon that leaves the party between the two scans is not sent", function()
+  local w = mworld({ party = { TEAM[1], SCATTERBUG } })
+  w.scans(1)
+  w.mem:party_mon(1, with(SCATTERBUG, { species = 665 }))
+  w.scans(1)
+  w.mem:party_empty(1)
+  w.scans(1)
+  eq(next(w.mons.evolving), nil, "forgotten")
+  eq(#w.events, 0, "events")
+end)
+
+test("a form change that keeps the species name is logged, not sent", function()
+  local w = mworld({ party = { with(SCATTERBUG, { species = 666, nick = "Vivillon" }) } })
+  w.scans(1)
+  w.mem:party_mon(0, with(SCATTERBUG, { species = 10250, nick = "Vivillon" }))
+  w.scans(3)
+  eq(#w.events, 0, "events")
+  eq(w.logged("changed form"), true, "logged")
+end)
+
+test("after a savestate load an already evolved mon is not sent; evolving again after loading an earlier state is", function()
+  local w = mworld({ party = { SCATTERBUG } })
+  w.scans(1)
+  w.mem:party_mon(0, with(SCATTERBUG, { species = 665, nick = "Spewpa" }))
+  w.mons:reset() -- a later state, already evolved
+  w.scans(3)
+  eq(#w.events, 0, "known as Spewpa after the load")
+  w.mem:party_mon(0, SCATTERBUG)
+  w.mons:reset() -- an earlier state, then it evolves again
+  w.scans(1)
+  w.mem:party_mon(0, with(SCATTERBUG, { species = 665, nick = "Spewpa" }))
+  w.scans(2)
+  eq(types(w.events), "evolve", "sent again (the sheet sets the same species)")
+end)
+
+test("a mon unreadable when tracking started is recorded on its first valid read, not sent", function()
+  local w = mworld({ party = { with(SCATTERBUG, { species = 17845, bad_checksum = true }) } })
+  w.step()
+  w.mem:party_mon(0, SCATTERBUG)
+  w.scans(4)
   eq(#w.events, 0, "events")
 end)
 

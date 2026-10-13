@@ -85,7 +85,7 @@ Every event has `id` (unique; repeats are ignored), `run` (identifies the save/r
 | `catch` | `pid`, `species`, `nick`, `location` | add a row (status Alive, KC 0) in the first empty row |
 | `kill` | `pid`, `split` (1–9), `trainer`, `key` | +1 in that split's column |
 | `death` | `pid` | Status → `Dead` |
-| `evolve` | `pid`, `from`, `to` | change species in place, KC kept |
+| `evolve` | `pid`, `from`, `to`, `nick` (optional) | change species in place (and the nickname, if sent), KC kept |
 | `trade` | `old_pid`, `pid`, `species`, `nick`, `location` | replace the row's mon in place, KC kept |
 | `split` | `badges` (0–8) | set Badges directly |
 | `sync` | `mons[]`, `defeated[]`, `badges`, `complete` | reconcile after a savestate / save load |
@@ -140,12 +140,13 @@ Load `lua/tracker.lua` in mGBA 0.10.3 (Tools → Scripting → File → Load scr
 | `death` | one of your mons fainted in a battle (sent when the battle ends) |
 | `split` | a gym leader was beaten; `badges` is how many of the eight leaders are defeated |
 | `catch` | a mon joined you: a battle ended with the mon caught (it is read from the party or box it was stored in, so the nickname is final), or a new mon with your OT id appeared in the party outside battle (the starter). `species`, `nick`, `location` (met location name) |
+| `evolve` | a known party mon's species changed, read the same with a valid checksum on two party scans (about a second apart). `from`, `to` are species names; `nick` is sent only when the game renamed the mon, which it does when the mon still had its species name (Scatterbug → Spewpa). A change that keeps the species name (a form change) is only logged |
 
 Events carry `run` (your trainer id) and `playTime`; `id` is added later by the relay. Kills in doubles use the leftmost live mon and set `ambiguous` when both of yours were alive (the attacker isn't read yet). A jump in play time (loading a savestate or a save) drops the current battle without emitting anything.
 
 Mons already in the party and boxes when the script starts, or after loading a savestate or save, are treated as known and not sent: the sheet may already have them (hand-entered rows have no id), and `sync` will reconcile them. A mon is sent at most once per timeline, and the sheet ignores a catch for an id it already has. Catching a species you already have is sent as a new mon (and logged); evolution lines are not checked.
 
-Not detected yet: evolutions, trades (a new party mon with another OT id is only logged), and the `sync` snapshot.
+Not detected yet: trades (a new party mon with another OT id is only logged), and the `sync` snapshot.
 
 ## Lua tests
 

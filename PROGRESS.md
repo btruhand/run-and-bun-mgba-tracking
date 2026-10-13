@@ -15,10 +15,10 @@ mGBA (Lua tracker) ──NDJSON/TCP──▶ relay (not built) ──HTTPS──
 | Area | State |
 |------|-------|
 | Game data (RAM / ROM map) | Party, battle, flags, names, PC boxes and screen ids found; catch and evolution behavior observed live. Doubles attacker still open |
-| Lua tracker | Battles (kills, deaths, splits) and catches including the starter done and live. Evolutions, trades, `sync`, output to the relay not started |
+| Lua tracker | Battles (kills, deaths, splits) and catches including the starter done and live. Evolutions done and live. Trades, `sync`, output to the relay not started |
 | Relay | Not started |
 | Apps Script / sheet | Web app, journal and reconcile done and tested on the dev sheet. Not on the real sheet |
-| Testing | Sheet tests (13) and Lua tests (41) pass. Remote control for in-emulator checks exists; no automated emulator-in-the-loop or end-to-end test |
+| Testing | Sheet tests (14) and Lua tests (50) pass. Remote control for in-emulator checks exists; no automated emulator-in-the-loop or end-to-end test |
 | Rollout to the real sheet | Not started |
 
 ## 1. Game data (RAM / ROM)
@@ -50,7 +50,8 @@ Details: [docs/MEMORY_MAP.md](docs/MEMORY_MAP.md), method in [docs/lua_progress/
   - [ ] Blackout (whole party wiped) in a wild fight, not seen live
 - [x] **Catches** (`mons.lua`): battle ends with outcome caught → the mon is looked up in party / boxes; outside battle a new own-OT party mon read the same on two scans with a valid checksum (the starter). Mons present at start or after a load are known, not sent (live: new game → starter Chimchar sent before the first battle, then a wild Starly on Route 102 sent when the battle ended)
   - [x] A catch with a full party goes to a box and is sent from there (live: Skitty as the seventh mon)
-- [ ] **Evolutions**: same id, different species between scans
+- [x] **Evolutions** (`mons.lua`): a known party mon with a new species, read the same with a valid checksum on two scans → `evolve {pid, from, to, nick?}`; `nick` only when the game renamed it. Same species name (a form change) is logged, not sent. Checked offline on the real Scatterbug → Spewpa states (`fixtures/private/r2-*`), and live: Skitty → Delcatty with a Moon Stone sent one `evolve` with `nick: "Delcatty"`. A level-up evolution right after a battle is skipped on purpose: runs level with the Endless Candy, so it rarely happens (the same scan would catch it once the battle ends)
+  - [x] Web app: `evolve` sets the nickname when `nick` is sent, and its undo puts it back (dev sheet)
 - [ ] **Trades**: tracked id replaced by an unknown id with a different OT in the same slot. In Run & Bun gift mons come from NPC trades, so they always land in the party (no gift-to-PC case). To check on a real trade: the met location (vanilla uses 254, "in-game trade", which the map table doesn't cover) and the slot transition on the trade screen
 - [ ] **`sync`**: snapshot of mons, defeated trainers, splits and play time on script start and on any play-time discontinuity (today a jump only resets the battle tracker silently)
 - [ ] New-run detection (a different trainer id) and what the script does about it
@@ -87,12 +88,12 @@ Done and tested on the **dev copy** only.
 ## 5. Testing and tooling
 
 - [x] `npm run test:sheet`: 13 scenarios against the dev web app (~2 min)
-- [x] `npm run test:lua`: 41 scenarios on a fake memory, no emulator (mutation-checked, including the catch rules)
+- [x] `npm run test:lua`: 50 scenarios on a fake memory, no emulator (mutation-checked, including the catch and evolution rules)
 - [x] `setup-clasp`, `gen-token`, `deploy:dev`
 - [x] Read-only probes `lua/spike/probe.lua`, `probe2.lua`
 - [x] Remote control `lua/dev/remote.lua` + `tools/remote.py`: buttons, screenshots, savestates and watchers from a script (live)
-- [x] Tests for catches
-- [ ] Tests for evolutions, trades and `sync` as they are written
+- [x] Tests for catches and evolutions
+- [ ] Tests for trades and `sync` as they are written
 - [ ] Emulator-in-the-loop test: mGBA with the ROM and a fixture state, assert on the emitted events. 0.10.3 has no `--script` flag, but the remote can load states and drive the game once loaded
 - [ ] End-to-end test: Lua output → relay → dev web app → sheet
 - [ ] `tools/replay.py` to post recorded event streams (from the design; may not be needed)
@@ -113,7 +114,7 @@ Done and tested on the **dev copy** only.
 ## Suggested order
 
 1. **Catches** done and live
-2. **Evolutions** and **trades** (same party and box scan)
+2. **Evolutions** done; **trades** next (same party scan)
 3. **`sync`** and new-run handling
 4. **Relay**, plus the Lua socket output; first end-to-end run against the dev sheet
 5. Roll out to the real sheet; first real leader win confirms the `split` flow

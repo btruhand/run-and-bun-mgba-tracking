@@ -84,7 +84,7 @@ Polling on the `frame` callback (every N frames for party scanning; every frame 
 - Debounce: require the new PID to be seen on 2+ consecutive scans, and ignore scans while in a transition (battle intro, box UI) to avoid phantom adds from mid-swap memory.
 
 ### Evolution
-- Same PID, different species ID between scans (outside of battle-intro frames) → `evolve {pid, from, to}`. Sheet updates species in place; KC is retained.
+- Same PID, different species ID between party scans, read the same with a valid checksum on two scans (scans don't run in battle) → `evolve {pid, from, to, nick?}`. `nick` is sent only when the game renamed the mon (it still had its species name). Sheet updates species (and nick) in place; KC is retained. A change that keeps the species name (a form change) is not sent.
 
 ### Death
 - Party mon HP reaches 0 → candidate. **Commit when the battle ends and HP is still 0** (or immediately when out of battle), so a mid-battle faint that's later handled isn't misread. Revives are illegal in the ruleset, so no un-death logic; a manual sheet edit can fix mistakes.
@@ -113,7 +113,7 @@ All events: `{ id, run, playTime, type, ... }` where `id` is `<run>:<seq>` (seq 
 {"type":"trade","old_pid":"...","pid":"...","species":"Nincada","nick":"","location":"Route 116"}
 {"type":"kill","pid":"...","split":2,"enemy":"Roxanne's Nosepass","trainer":"<trainerId>","key":"<trainerId>:<enemySlot>","indirect":false}
 {"type":"death","pid":"..."}
-{"type":"evolve","pid":"...","from":"Piplup","to":"Prinplup"}
+{"type":"evolve","pid":"...","from":"Scatterbug","to":"Spewpa","nick":"Spewpa"}   // nick only if the game renamed it
 {"type":"split","badges":3}
 {"type":"snapshot","party":[...],"boxes":[...]}          // periodic, for reconciliation
 ```
@@ -188,7 +188,7 @@ So only *kills* (and deaths of boxed mons) depend on remembered history. Everyth
 - `trade`: find the row by `old_pid`; replace ID, `I`, `H`, `J`; keep status and KC.
 - `kill`: row by PID; `addKill(row, split)` using the event's own split (not `AA4`, which a human may be mid-click on); then sets `AA4` to the game's split if it differs.
 - `death`: `F` = `Dead`; sort.
-- `evolve`: `I` = new species by PID.
+- `evolve`: `I` = new species by PID; the nickname too when `nick` is sent.
 - `split`: set `AA4` to the game's split.
 - `snapshot`: reconcile only — write mismatches (mon in game not on sheet, sheet mon missing in game) to `_Issues` instead of silently editing.
 - `LockService` around every write so concurrent POSTs and manual edits don't interleave a sort.

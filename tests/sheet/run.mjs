@@ -73,6 +73,15 @@ const scenarios = {
     assert.equal(r.species, 'Prinplup');
     assert.equal(r.total, 1);
   },
+  async 'evolve with a nick renames the mon, and a rewind puts species and nick back'() {
+    await send(ev('catch', 10, { pid: A, species: 'Scatterbug', nick: 'Scatterbug', location: 'Route 101', source: 'catch' }));
+    await send(ev('evolve', 30, { pid: A, from: 'Scatterbug', to: 'Spewpa', nick: 'Spewpa' }));
+    let r = byId(await dump(), A);
+    assert.deepEqual([r.species, r.nick], ['Spewpa', 'Spewpa']);
+    await send(sync(20, [mon(A, '', { nick: undefined })], { complete: true }));
+    r = byId(await dump(), A);
+    assert.deepEqual([r.species, r.nick], ['Scatterbug', 'Scatterbug']);
+  },
   async 'trade substitutes in place and keeps KC'() {
     await send(catchEv(10, A, 'Seedot'), killEv(20, A, 1, 't1'));
     await send(ev('trade', 30, { old_pid: A, pid: B, species: 'Nincada', nick: 'Bug', location: 'Route 116' }));
