@@ -79,15 +79,16 @@ Done and tested on the **dev copy** only.
 - [x] Events: `catch`, `kill`, `death`, `evolve`, `trade`, `split`, `sync`
 - [x] Idempotency by event id, run mismatch held, journal in hidden `_Events`, issues in `_Issues`
 - [x] `sync` reconcile: rewind, forward jump, killer re-attribution, adds missing mons
-- [x] Dev-only `dump` / `reset` actions (refuse unless `ENV=dev`)
+- [x] Dev-only `dump` / `reset` / `undo` actions (refuse unless `ENV=dev`)
 - [ ] Event for a mon that vanishes from party and boxes (`missing`); the design has it, the web app doesn't
-- [ ] "Resync" sheet menu item and "undo last event" command (from the design)
+- [x] Undo latest tracking change button (`AA11`): reverts the newest event that changed the sheet and deletes it from `_Events` (dev sheet, via the dev-only `undo` action)
+- [ ] "Resync" sheet menu item (from the design)
 - [ ] Use the `ambiguous` flag on kills (today ignored; could write an `_Issues` row)
 - [ ] Known limit: one enemy mon's credit across two jumped-between timelines goes to the most recent killer
 
 ## 5. Testing and tooling
 
-- [x] `npm run test:sheet`: 13 scenarios against the dev web app (~2 min)
+- [x] `npm run test:sheet`: 18 scenarios against the dev web app (~2 min)
 - [x] `npm run test:lua`: 50 scenarios on a fake memory, no emulator (mutation-checked, including the catch and evolution rules)
 - [x] `setup-clasp`, `gen-token`, `deploy:dev`
 - [x] Read-only probes `lua/spike/probe.lua`, `probe2.lua`

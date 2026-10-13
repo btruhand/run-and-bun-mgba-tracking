@@ -45,6 +45,25 @@ function onEditRankings_(e, sheet, range) {
     range.setValue(false);
   }
 
+  // UNDO LATEST TRACKING CHANGE: reverts the newest web-app event and removes it from _Events
+  if (col === PANEL.COL && row === PANEL.UNDO_ROW && e.value == 'TRUE') {
+    range.setValue(false);
+    var lock = LockService.getScriptLock();
+    if (!lock.tryLock(10000)) {
+      e.source.toast('The tracker is busy, try again in a moment.', 'Undo');
+      return;
+    }
+    try {
+      var res = undoLatest_(newContext_());
+      SpreadsheetApp.flush();
+      if (!res.undone) e.source.toast('Nothing to undo.', 'Undo');
+      else if (res.missing) e.source.toast('Removed ' + res.undone + ' from the log, but that mon is no longer on the sheet, so nothing changed.', 'Undo');
+      else e.source.toast('Undid ' + res.undone + (res.partial ? '. Part of it was edited by hand and kept; see _Issues.' : '.'), 'Undo');
+    } finally {
+      lock.releaseLock();
+    }
+  }
+
   // ADVANCE SPLIT: Badges + 1
   if (col === PANEL.COL && row === PANEL.ADVANCE_ROW && e.value == 'TRUE') {
     setBadges(sheet, getBadges(sheet) + 1);

@@ -27,7 +27,8 @@ var PANEL = {
   ATTEMPT_ROW: 2,
   BADGES_ROW: 4, // also the current split offset: KC column = KC_FIRST + badges
   ADVANCE_ROW: 7,
-  RESET_ROW: 9
+  RESET_ROW: 9,
+  UNDO_ROW: 11
 };
 
 // Sorted block: everything the old script sorted (D:T) plus the ID column so it travels with its row.

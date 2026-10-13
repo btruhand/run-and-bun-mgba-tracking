@@ -190,7 +190,7 @@ So only kills (and deaths of boxed mons) depend on remembered history. Everythin
 
 ### The existing sheet
 
-- Rows **3–102** (100 mons). Columns: `D` gender, `E` formula keyed off Total KC, `F` status, `G` IMG, `H` nickname, `I` species, `J` encounter location, `K:S` the nine split KCs, `T` total KC, `U:W` formulas and the Add KO checkbox. `AA2` attempt, `AA4` **Badges** (the 0-based split, KC column = `K + AA4`), `AA7` Advance Split (`AA4++`), `AA9` Reset Run.
+- Rows **3–102** (100 mons). Columns: `D` gender, `E` formula keyed off Total KC, `F` status, `G` IMG, `H` nickname, `I` species, `J` encounter location, `K:S` the nine split KCs, `T` total KC, `U:W` formulas and the Add KO checkbox. `AA2` attempt, `AA4` **Badges** (the 0-based split, KC column = `K + AA4`), `AA7` Advance Split (`AA4++`), `AA9` Reset Run, `AA11` Undo latest tracking change.
 - Entering a location in `J` initialises the row (Alive, KC 0); clearing it blanks the row. Every edit re-sorts by Total KC descending, then Alive above Dead.
 - Alive, Deaths and KO Total are formulas the script never touches.
 
@@ -198,9 +198,10 @@ So only kills (and deaths of boxed mons) depend on remembered history. Everythin
 
 - **`onEdit` does not fire for script writes**, so the row logic moved from `Sorter.js` into shared helpers in `Rankings.js` (`initRow`, `blankRow`, `recomputeTotal`, `addKc`, `sortRankings`, …), used by both the buttons and the web app.
 - Sort range `D3:Y102` (id column `Y`). Reset Run also clears the id column and the event log.
-- **`WebApp.js`**: `doPost` checks the token (Script Properties), takes `LockService`, skips ids already in `_Events`, holds events from another run, applies each event and journals its inverse, then sorts once. `@OnlyCurrentDoc`. Dev-only `dump` / `reset` actions refuse to run unless `ENV=dev`.
+- **`WebApp.js`**: `doPost` checks the token (Script Properties), takes `LockService`, skips ids already in `_Events`, holds events from another run, applies each event and journals its inverse, then sorts once. `@OnlyCurrentDoc`. Dev-only `dump` / `reset` / `undo` actions refuse to run unless `ENV=dev`.
 - Event handling: `catch` fills the first empty row (skipped if the id is already there; `_Issues` if full); `kill` adds 1 to the event's own split column; `death` sets Dead; `evolve` sets the species (and nickname when sent); `trade` swaps id/species/nickname/location in place; `split` sets `Badges`; `sync` reconciles.
-- Not built: a `missing` event, a "Resync" menu item, an "undo last event" command, using the `ambiguous` flag.
+- **Undo latest tracking change** (`AA11`): applies the inverse of the newest active `_Events` entry that changed the sheet and deletes that entry, rather than marking it inactive, because `sync` re-activates inactive entries that still check out. Same lock as `doPost`. Conditional inverses still apply, so manual edits win.
+- Not built: a `missing` event, a "Resync" menu item, using the `ambiguous` flag.
 
 ## Edge cases / risks
 
@@ -233,7 +234,7 @@ relay/          (not created) relay.py
 1. **Lua tests, no emulator** (`npm run test:lua`). The detectors run on a fake memory that writes real encrypted structs with checksums at the real addresses, and models the GBA bus's rotated misaligned reads. Several scenarios replay frame sequences logged from real play. Key rules are broken on purpose to confirm a test fails.
 2. **Offline runs on real savestates.** `tools/state.py` reads RAM out of mGBA savestates; a harness runs `tracker.lua` against pairs of real states (e.g. before and after an evolution).
 3. **Driving the real game.** `lua/dev/remote.lua` + `tools/remote.py` press buttons, take screenshots, save/load states and log memory every frame from a script. mGBA 0.10.3 has no `--script` flag, so the remote is loaded by hand once per mGBA session. Not an automated test yet.
-4. **Sheet scenarios on the dev copy** (`npm run test:sheet`). They post event streams (including rewinds, forward jumps, trades and killer re-attribution) to the dev web app, then read the sheet back with the dev-only `dump`. The endpoints refuse `dump` / `reset` unless `ENV=dev`, so tests can never touch the real sheet.
+4. **Sheet scenarios on the dev copy** (`npm run test:sheet`). They post event streams (including rewinds, forward jumps, trades and killer re-attribution) to the dev web app, then read the sheet back with the dev-only `dump`. The endpoints refuse `dump` / `reset` / `undo` unless `ENV=dev`, so tests can never touch the real sheet.
 5. **Not built:** an end-to-end test (Lua → relay → dev web app → sheet) and an automated emulator-in-the-loop test.
 
 Secrets/config (`.env`, gitignored): dev web-app URL, shared token, deployment id. The token also lives in Script Properties.

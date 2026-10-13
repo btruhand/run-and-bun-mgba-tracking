@@ -20,6 +20,7 @@ async function call(body) {
 }
 const reset = () => call({ action: 'reset' });
 const dump = async () => (await call({ action: 'dump' })).state;
+const undo = async () => (await call({ action: 'undo' })).result;
 
 let seq = 0, RUN = 'run1';
 const ev = (type, playTime, rest = {}) => ({ id: `${RUN}:${++seq}`, run: RUN, playTime, type, ...rest });
@@ -134,6 +135,41 @@ const scenarios = {
     RUN = saved;
     assert.equal(r[0].status, 'held');
     assert.equal((await dump()).rows.length, 1);
+  },
+  async 'undo reverts the latest change and removes it from the journal, one per press'() {
+    await send(catchEv(10, A, 'Piplup'), killEv(20, A, 1, 't1'), killEv(30, A, 2, 't2'));
+    assert.match((await undo()).undone, /^KO by Piplup \(split 2\)/);
+    let s = await dump();
+    assert.deepEqual(byId(s, A).kc, [1, 0, 0, 0, 0, 0, 0, 0, 0]);
+    assert.equal(s.journal.length, 2);
+    await undo(); await undo();
+    s = await dump();
+    assert.equal(s.rows.length, 0);
+    assert.equal(s.journal.length, 0);
+    assert.equal((await undo()).undone, null);
+  },
+  async 'undo puts back badges, status and an evolution'() {
+    await send(catchEv(10, A, 'Scatterbug'), ev('evolve', 20, { pid: A, from: 'Scatterbug', to: 'Spewpa', nick: 'Spewpa' }));
+    await send(ev('death', 30, { pid: A }), ev('split', 40, { badges: 1 }));
+    await undo(); await undo(); await undo();
+    const s = await dump();
+    assert.equal(s.panel.badges, 0);
+    assert.deepEqual([byId(s, A).status, byId(s, A).species, byId(s, A).nick], ['Alive', 'Scatterbug', '']);
+  },
+  async 'undo skips entries already undone by a rewind and no-ops'() {
+    await send(catchEv(10, A, 'Piplup'), killEv(20, A, 1, 't1'), killEv(200, A, 1, 't2'));
+    await send(sync(100, [mon(A, 'Piplup')], { defeated: ['t1'], complete: true }));
+    await send(ev('catch', 110, { pid: A, species: 'Piplup', nick: '', location: 'Route 101', source: 'catch' })); // already on the sheet
+    assert.match((await undo()).undone, /^KO by/);
+    const s = await dump();
+    assert.equal(byId(s, A).total, 0);
+    assert.deepEqual(s.journal.map((j) => [j.type, j.playTime, j.active]), [['catch', 10, true], ['kill', 200, false], ['catch', 110, true]]);
+  },
+  async 'an undone event stays undone through a later sync'() {
+    await send(catchEv(10, A, 'Piplup'), killEv(20, A, 1, 't1'));
+    await undo();
+    await send(sync(100, [mon(A, 'Piplup')], { defeated: ['t1'], complete: true }));
+    assert.equal(byId(await dump(), A).total, 0);
   },
   async 'sorting keeps row formulas pointing at their own row'() {
     await send(catchEv(10, A, 'Piplup'), catchEv(11, B, 'Zigzagoon'), catchEv(12, C, 'Ralts'));

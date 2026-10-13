@@ -43,9 +43,15 @@ function handleRequest_(req) {
     var action = req.action || 'events';
     var out;
 
-    if (action === 'dump' || action === 'reset') {
+    if (action === 'dump' || action === 'reset' || action === 'undo') {
       if (props.getProperty('ENV') !== 'dev') return json_({ok: false, error: 'dev-only'});
       if (action === 'dump') return json_({ok: true, state: dump_(ctx)});
+      if (action === 'undo') { // same as the Undo button, for the scenario tests
+        var res = undoLatest_(ctx);
+        SpreadsheetApp.flush();
+        sortRankings(ctx.sheet);
+        return json_({ok: true, result: res});
+      }
       resetDev_(ctx);
       return json_({ok: true});
     }
@@ -257,7 +263,7 @@ function applyForward_(ctx, ev) {
 }
 
 // Applies an inverse operation. Conditional: if the sheet no longer looks like what the event produced
-// (e.g. a manual edit), it is skipped and recorded in _Issues rather than fought.
+// (e.g. a manual edit), it is skipped and recorded in _Issues rather than fought; returns false then.
 function applyInverse_(ctx, inv, ev) {
   if (!inv) return;
   var sheet = ctx.sheet;
@@ -286,7 +292,7 @@ function applyInverse_(ctx, inv, ev) {
       var cell = sheet.getRange(row, COL.STATUS);
       if (inv.onlyIf && cell.getValue() !== inv.onlyIf) {
         logIssue_(ctx, 'skipped undo: status of ' + inv.pid + ' was edited', ev);
-        return;
+        return false;
       }
       cell.setValue(inv.status);
       ctx.mutated = true;
@@ -298,15 +304,18 @@ function applyInverse_(ctx, inv, ev) {
       var sp = sheet.getRange(row, COL.SPECIES);
       if (inv.onlyIf && sp.getValue() !== inv.onlyIf) {
         logIssue_(ctx, 'skipped undo: species of ' + inv.pid + ' was edited', ev);
-        return;
+        return false;
       }
       sp.setValue(inv.species);
+      ctx.mutated = true;
       if (inv.nickIf !== undefined) {
         var nick = sheet.getRange(row, COL.NICK);
-        if (nick.getValue() === inv.nickIf) nick.setValue(inv.nick);
-        else logIssue_(ctx, 'skipped undo: nickname of ' + inv.pid + ' was edited', ev);
+        if (nick.getValue() !== inv.nickIf) {
+          logIssue_(ctx, 'skipped undo: nickname of ' + inv.pid + ' was edited', ev);
+          return false;
+        }
+        nick.setValue(inv.nick);
       }
-      ctx.mutated = true;
       return;
     }
     case 'swapBack': {
@@ -322,7 +331,7 @@ function applyInverse_(ctx, inv, ev) {
     case 'setBadges': {
       if (inv.onlyIf !== undefined && getBadges(sheet) !== inv.onlyIf) {
         logIssue_(ctx, 'skipped undo: badges was edited', ev);
-        return;
+        return false;
       }
       setBadges(sheet, inv.value);
       return;
@@ -449,6 +458,43 @@ function shouldBeActive_(en, sync, present, defeated, arrival) {
       return true; // badges are set directly from the snapshot
   }
   return true;
+}
+
+// ---------------------------------------------------------------- undo (button)
+
+// Called by the Undo button: reverts the newest active journal entry that changed the sheet and deletes it
+// from the journal, so a later sync can't re-apply it. Entries already undone by a rewind and no-ops
+// are skipped. If the mon's row is gone (cleared by hand), nothing is reverted but the entry is still deleted,
+// so the next press moves on. Returns {undone: description, partial, missing} or {undone: null}.
+function undoLatest_(ctx) {
+  var entries = readJournal_(ctx);
+  for (var i = entries.length - 1; i >= 0; i--) {
+    var en = entries[i];
+    if (!en.active || !en.inverse) continue;
+    var what = describeEntry_(ctx, en);
+    var missing = en.inverse.pid !== undefined && !findRowById(ctx.sheet, en.inverse.pid);
+    var ok = true;
+    if (missing) logIssue_(ctx, 'skipped undo: ' + en.inverse.pid + ' is not on the sheet', en.payload);
+    else ok = applyInverse_(ctx, en.inverse, en.payload);
+    ctx.journal.deleteRow(en.rowNum);
+    return {undone: what, partial: ok === false, missing: missing};
+  }
+  return {undone: null};
+}
+
+function describeEntry_(ctx, en) {
+  var ev = en.payload;
+  var row = findRowById(ctx.sheet, en.pid);
+  var name = row ? (ctx.sheet.getRange(row, COL.NICK).getValue() || ctx.sheet.getRange(row, COL.SPECIES).getValue()) : en.pid;
+  switch (en.type) {
+    case 'catch': return 'catch of ' + (ev.nick || ev.species);
+    case 'kill': return 'KO by ' + name + ' (split ' + ev.split + ')';
+    case 'death': return 'death of ' + name;
+    case 'evolve': return 'evolution ' + ev.from + ' → ' + ev.to;
+    case 'trade': return 'trade for ' + (ev.nick || ev.species);
+    case 'split': return 'split change to ' + ev.badges + ' badges';
+  }
+  return en.type;
 }
 
 // ---------------------------------------------------------------- run reset + dev-only actions

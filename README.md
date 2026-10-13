@@ -56,7 +56,7 @@ fixtures/private/   your ROM / savestates (gitignored)
 | `W` | Add KO checkbox |
 | `Y` | hidden mon ID (`personality:otid`), written only by the web app |
 
-Right-hand panel (column `AA`): `AA2` Attempt, `AA4` Badges, `AA7` Advance Split, `AA9` Reset Run. **Badges is the current split**: a kill goes in column `K + Badges`.
+Right-hand panel (column `AA`): `AA2` Attempt, `AA4` Badges, `AA7` Advance Split, `AA9` Reset Run, `AA11` Undo latest tracking change. **Badges is the current split**: a kill goes in column `K + Badges`.
 
 The table is sorted by Total KC (descending), then Status (Alive above Dead), over `D3:Y102`.
 
@@ -97,6 +97,8 @@ Responses: `{ok: true, results: [{id, status}]}` where status is `applied`, `dup
 ### Event log and `sync`
 
 Every applied event is recorded in a hidden `_Events` tab together with how to undo it. Problems (unknown mon, full table, skipped undo) go to a hidden `_Issues` tab.
+
+**Undo latest tracking change** (`AA11`) reverts the newest event in `_Events` that changed the sheet and deletes it from the log, so a later `sync` can't bring it back. Each press undoes one more; a toast says what was undone. Events already undone by a rewind are skipped. If you edited the affected cells by hand since, your edit is kept and the skip is logged to `_Issues`. If the mon's row is gone (cleared by hand), nothing changes but the event is still removed from the log, and the toast says so. A deleted event's id is forgotten, so if the same event were sent again it would be applied again.
 
 `sync` handles loading savestates and older saves, where the game goes back in time but the sheet doesn't. It carries a snapshot of the game: the mons you have, which trainers are defeated, and the badge count. The sheet then:
 
