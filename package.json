@@ -12,6 +12,8 @@
     "deploy:dev": "scripts/deploy-dev.sh",
     "test:sheet": "node tests/sheet/run.mjs",
     "test:lua": "lua tests/lua/run.lua",
+    "test:relay": "node --test tests/relay/",
+    "relay": "node relay/relay.mjs",
     "setup-clasp": "node scripts/setup-clasp.js"
   },
   "keywords": [

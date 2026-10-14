@@ -5,8 +5,8 @@ Pokémon Run & Bun 1.0.7 in mGBA 0.10.3. This file is the design and the reasons
 checked is in [PROGRESS.md](PROGRESS.md); addresses and observed game behavior are in
 [docs/MEMORY_MAP.md](docs/MEMORY_MAP.md).
 
-Status in one line: the Lua tracker (kills, deaths, splits, catches, evolutions) and the web app are built; trades,
-`sync` and the relay are not, so events only reach the mGBA console today.
+Status in one line: the Lua tracker (kills, deaths, splits, catches, evolutions), the relay and the web app are built
+and work end to end on the dev copy; trades and `sync` are not.
 
 ## Goals
 
@@ -54,10 +54,10 @@ counts toward its own split, because the kill that finishes the leader is sent b
 
 ```
  mGBA (Run & Bun ROM)
-   └─ Lua script (reads RAM, detects events)                  built
-        │  newline-delimited JSON over localhost TCP           not built (prints to the console today)
+   └─ Lua script (reads RAM, detects events, stamps ids)      built
+        │  newline-delimited JSON over localhost TCP (port 38765)
         ▼
- Local relay (small daemon, disk-backed queue, retries)       not built
+ Local relay (relay/relay.mjs: in-memory queue, retries)      built
         │  HTTPS POST + shared secret
         ▼
  Apps Script web app  (doPost, bound to the sheet)            built, on the dev copy
@@ -68,13 +68,14 @@ counts toward its own split, because the kill that finishes the leader is sent b
 
 Why this shape:
 
-- **mGBA Lua can't do HTTPS** (raw TCP sockets only), so something local has to sit in the middle. The relay is deliberately dumb: stamp ids, forward, queue on disk, retry. It holds no game logic.
+- **mGBA Lua can't do HTTPS** (raw TCP sockets only), so something local has to sit in the middle. The relay is deliberately dumb: forward, retry briefly, drop. It holds no game logic.
+- **Best effort, nothing stored.** An event that can't be delivered (relay not running, or its request failing 4 times in a row) is dropped and logged rather than kept. Delivery failures are rare and a dropped event can be fixed by hand (or by `sync`, once built); in exchange there is nothing to clean up, and no old event can arrive after a Reset Run and be applied to the new run. (A file-based version with a disk queue was built first and replaced for this reason.)
 - **Apps Script as the sheet writer** (vs. Sheets API + service account): no GCP project/OAuth, it shares the row logic with the existing buttons, and it's where dedupe lives. Trade-off: web-app deployment + a shared-secret token in Script Properties.
 - **Lua emits events, not sheet edits.** Lua stays small and testable; all sheet knowledge (rows, columns, formulas) is in one place.
-- **Idempotency via event ids.** Each event has a unique id (`<run>:<seq>`, stamped by the relay). The web app records processed ids in `_Events` and ignores repeats, so retries, relay restarts and replays are safe.
+- **Idempotency via event ids.** Each event has a unique id, stamped by the tracker when it is detected (see "Event schema"). The web app records processed ids in `_Events` and ignores repeats, so a retry after a request that did reach the sheet applies nothing twice.
 - **Increments, not overwrites, for kills.** The web app applies deltas (`KC += 1`), so manual edits (the Add KO checkbox, fixes) are never clobbered.
 
-Languages: Lua 5.4 (mGBA built-in); Python 3 stdlib for the relay; Apps Script managed with `clasp` in this repo.
+Languages: Lua 5.4 (mGBA built-in); Node, no packages, for the relay (like the scripts and sheet tests); Apps Script managed with `clasp` in this repo.
 
 ## Identifying a Pokémon
 
@@ -132,7 +133,8 @@ In Run & Bun, gift mons come from NPC trades, and a traded mon always lands in t
 
 ## Event schema
 
-All events: `{ id, run, playTime, type, ... }`. `id` is `<run>:<seq>` (stamped by the relay, sequence persisted), `run` is the save's trainer id + secret id, and `playTime` is **in-game play time in seconds** (see "Savestates & old saves").
+All events: `{ id, run, playTime, type, ... }`. `id` is `<run>:<session>.<n>` (stamped by the tracker: `session` is the
+clock, in hex, when the script was first loaded in this mGBA, and `n` counts up; both survive reloading the script), `run` is the save's trainer id + secret id, and `playTime` is **in-game play time in seconds** (see "Savestates & old saves").
 
 ```json
 {"type":"catch","pid":"0xA1B2C3D4:0x1234ABCD","species":"Starly","nick":"Starly","location":"Route 102"}
@@ -184,7 +186,36 @@ So only kills (and deaths of boxed mons) depend on remembered history. Everythin
 - **Same fight, two branches.** Credit for one enemy mon (`key`) can only belong to one mon. If you play a fight twice with different killers and then jump between the two branches, the most recently recorded credit wins. Flagged in `_Issues`; fixable by hand. If it bites, the battle's starting RNG state could go into the key to tell branches apart.
 - Manual Add KO clicks are not journaled and are never rolled back.
 - A boxed mon's death can't be verified from the game; it relies on play time only.
-- If the relay or sheet was offline while you loaded states, the `sync` is queued and processed in order, so the outcome is the same, just late.
+- If the relay or sheet is offline when you load a state, that `sync` is lost (see "Relay"); the next one corrects the sheet.
+
+## Relay (`relay/relay.mjs`)
+
+Node (`.nvmrc`), no packages, one process, run from a terminal next to mGBA. It keeps nothing on disk.
+
+1. **Connection.** The relay listens on `127.0.0.1:38765`. The tracker (`lua/relay_client.lua`) tries to connect when
+   it loads and every two seconds while disconnected; on localhost a refused connect returns at once, so the game
+   doesn't stall. Each event is sent as one JSON line. An event detected while not connected is not sent, and the
+   console line says so.
+2. **The relay never writes to the connection.** mGBA 0.10.3 sends with a plain `write()` and doesn't ignore SIGPIPE,
+   so writing twice to a connection the relay has closed would kill the emulator. Because the relay never writes, the
+   socket becoming readable can only mean the relay closed it; the tracker checks every frame and before each send,
+   and closes its side first. A short write also closes the connection; the relay ignores a line cut off by a close.
+3. **Send.** Lines are queued in memory. Every 200 ms, whatever is queued (usually one event) is taken off the queue
+   and sent as one POST (`{token, events}`); Apps Script answers with a redirect to the result, which is followed
+   with a GET. The per-event result (applied, duplicate, held, ignored) is logged.
+4. **Failures.** Unreachable, an HTTP error, a refused token or an error in the script: the request is retried
+   3 times, waiting about 1, 2 and 4 s after each failure (each ±50% at random, so requests that failed together don't
+   retry in step). If the third retry fails too, its events are dropped and logged
+   (`GAVE UP`). Anything not yet sent when the relay stops is dropped too.
+5. **No ordering between requests.** Each request is independent: one being retried doesn't hold up the next, so the
+   sheet is never blocked behind a failing request. The cost is that a retried event can land after a later one. The
+   case that matters is a `kill`, `death` or `evolve` reaching the sheet before its mon's `catch`: the sheet answers
+   `ignored` (unknown pid), the relay logs it, `_Issues` records it, and the row is fixed by hand. Catches and a mon's
+   first event are normally minutes apart, so this needs a retry at the wrong moment. `sync` (once built) is the
+   other order-sensitive event; it will need the same care.
+
+On start it posts an empty batch to check the URL and token. `--env` picks another `.env` (another sheet), `--port`
+another port (the tracker reads `TRACKER_RELAY_PORT`).
 
 ## Sheet (Apps Script)
 
@@ -206,8 +237,9 @@ So only kills (and deaths of boxed mons) depend on remembered history. Everythin
 ## Edge cases / risks
 
 - **New run.** Started by hand: press Reset Run, which clears `Rankings`, `_Events`, `_Issues` and the tracked run; the first event after it sets the new run. The Lua side doesn't detect new runs; it just sends the current trainer id as `run`. Events from another run before the reset are held (logged to `_Issues`, not applied), so press Reset Run before picking the starter; a later `sync` adds any mon that was missed.
-- **Relay down / offline.** Lua reconnects; the relay queues to disk; ids dedupe; play-time ordering keeps rollback correct when delayed events arrive in order.
-- **Apps Script quotas/latency.** A handful of events per battle; each request takes a few seconds; the relay batches.
+- **Relay down / offline.** Events are dropped (logged in the mGBA console or the relay's terminal) if the relay isn't running, or if their request fails 4 times in a row (about 7 s when the network is down; up to 4 minutes if every attempt runs into the 60 s timeout). Fix the row by hand; `sync`, once built, will correct catches, species, deaths and badges on the next load, but not kill credit.
+- **Reset Run while events are in flight.** An event is delivered or dropped within seconds unless the web app hangs, so pressing Reset Run before starting the new game is enough.
+- **Apps Script quotas/latency.** A handful of events per battle; each request takes a few seconds, and the web app's lock runs overlapping requests one at a time; events that arrive within the same 200 ms share a request.
 - **Odd moves** (Pursuit, Future Sight, Perish Song) in doubles may be credited to the wrong mon until the attacker is read; `ambiguous` marks the doubles cases.
 - **Address drift.** Addresses are for Run & Bun **1.0.7** and live in `lua/addresses.lua`. The tracker checks the ROM's name tables at start and refuses to run on anything else.
 - **Manual edits vs. journal.** Inverses are conditional and manual edits win; `_Issues` records any skipped inverse.
@@ -226,7 +258,7 @@ tests/lua/      tracker tests on fake memory
 tests/sheet/    scenario tests against the dev web app
 scripts/        setup-clasp, gen-token, deploy-dev
 docs/           MEMORY_MAP.md, lua_progress/
-relay/          (not created) relay.py
+relay/          relay.mjs
 ```
 
 ## Testing
@@ -235,7 +267,8 @@ relay/          (not created) relay.py
 2. **Offline runs on real savestates.** `tools/state.py` reads RAM out of mGBA savestates; a harness runs `tracker.lua` against pairs of real states (e.g. before and after an evolution).
 3. **Driving the real game.** `lua/dev/remote.lua` + `tools/remote.py` press buttons, take screenshots, save/load states and log memory every frame from a script. mGBA 0.10.3 has no `--script` flag, so the remote is loaded by hand once per mGBA session. Not an automated test yet.
 4. **Sheet scenarios on the dev copy** (`npm run test:sheet`). They post event streams (including rewinds, forward jumps, trades and killer re-attribution) to the dev web app, then read the sheet back with the dev-only `dump`. The endpoints refuse `dump` / `reset` / `undo` unless `ENV=dev`, so tests can never touch the real sheet.
-5. **Not built:** an end-to-end test (Lua → relay → dev web app → sheet) and an automated emulator-in-the-loop test.
+5. **Relay tests, no network** (`npm run test:relay`): a fake web app (including the Apps Script redirect) that can be down, refuse the token or fail; one request per tick, the 3 retries and their 1, 2, 4 s waits, dropping a request, a request being retried not holding up the next, and the TCP server (lines split across reads, a line cut off by a disconnect, reconnects, never writing back). The Lua side (`relay_client.lua`) is tested against a fake of mGBA's socket API in `npm run test:lua`.
+6. **Not built:** an automated end-to-end test (Lua → relay → dev web app → sheet; it was run by hand once) and an automated emulator-in-the-loop test.
 
 Secrets/config (`.env`, gitignored): dev web-app URL, shared token, deployment id. The token also lives in Script Properties.
 
@@ -257,5 +290,5 @@ Secrets/config (`.env`, gitignored): dev web-app URL, shared token, deployment i
 - `gBattlerAttacker`, for exact doubles credit and the `indirect` flag.
 - Trades: the met location of a traded mon and the slot behavior on the trade screen.
 - `sync` from Lua.
-- The relay and the Lua socket output (mGBA 0.10.3's `socket` API not verified yet).
+- The tracker's socket client inside mGBA (checked against mGBA 0.10.3's source and a fake of its API; not yet live).
 - The first real gym leader win, to confirm the leader ids and the `split` flow.

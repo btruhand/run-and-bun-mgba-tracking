@@ -10,6 +10,7 @@ local J = require("json")
 local Battle = require("battle")
 local Mons = require("mons")
 local Fake = require("fakemem")
+local RelayClient = require("relay_client")
 
 local failures, passed = 0, 0
 
@@ -719,6 +720,99 @@ end)
 test("json encodes sorted keys, arrays, and escapes", function()
   eq(J.encode({ type = "kill", split = 2, ok = true, list = { 1, 2 }, s = 'a"b' }),
      '{"list":[1,2],"ok":true,"s":"a\\"b","split":2,"type":"kill"}', "json")
+end)
+
+-- A fake of mGBA's `socket` API with one relay that can be listening or not, and can close the connection.
+local function fake_net()
+  local net = { listening = true, connects = 0, sent = {}, wrote_after_close = false }
+  function net.tcp()
+    local s = {}
+    function s:connect()
+      net.connects = net.connects + 1
+      if not net.listening then return nil, "CONNECTION_REFUSED" end
+      net.conn, net.peer_closed = self, false
+      return 1
+    end
+    function s:hasdata() return net.conn == self and net.peer_closed end -- the relay never writes; readable = closed
+    function s:send(data)
+      if self.closed then error("send on a closed socket") end
+      if net.peer_closed then net.wrote_after_close = true end
+      if net.short then return 3 end
+      net.sent[#net.sent + 1] = data
+      return #data
+    end
+    function s:close() self.closed = true end
+    return s
+  end
+  function net.relay_stops() net.peer_closed, net.listening = true, false end
+  return net
+end
+
+local function client(net)
+  local logs = {}
+  local c = RelayClient.new(38765, function(m) logs[#logs + 1] = m end, net)
+  return c, logs
+end
+
+test("the relay client connects on the first frame and sends one line per event", function()
+  local net = fake_net()
+  local c = client(net)
+  c:step()
+  eq(c:send('{"type":"kill"}'), true, "sent")
+  c:send('{"type":"death"}')
+  eq(table.concat(net.sent), '{"type":"kill"}\n{"type":"death"}\n', "bytes")
+end)
+
+test("without a relay, events are not sent and it retries every two seconds, warning once", function()
+  local net = fake_net()
+  net.listening = false
+  local c, logs = client(net)
+  for _ = 1, 240 do c:step() end
+  eq(net.connects, 2, "connect attempts in 240 frames")
+  local ok, why = c:send("x")
+  eq(ok, false, "send")
+  eq(why, "relay not connected", "why")
+  eq(#logs, 1, "warned once")
+  net.listening = true
+  for _ = 1, 120 do c:step() end
+  eq(c:send("y"), true, "sent once the relay is up")
+  eq(table.concat(net.sent), "y\n", "bytes")
+end)
+
+test("a connection the relay closed is never written to again (SIGPIPE would kill mGBA)", function()
+  local net = fake_net()
+  local c, logs = client(net)
+  c:step()
+  net.relay_stops()
+  eq(c:send("x"), false, "closed in the same frame, before step() saw it")
+  c:step()
+  eq(net.wrote_after_close, false, "no write after the relay closed")
+  eq(logs[#logs], "disconnected; reconnecting every 2 s", "log")
+  net.listening = true
+  for _ = 1, 120 do c:step() end
+  eq(c:send("y"), true, "reconnected")
+end)
+
+test("after a relay restart the next event goes through, without one being dropped to notice", function()
+  local net = fake_net()
+  local c = client(net)
+  c:step()
+  net.relay_stops()
+  c:step()
+  net.listening = true
+  for _ = 1, 120 do c:step() end
+  eq(c:send("x"), true, "sent on the new connection")
+end)
+
+test("a short write closes the connection, so the relay drops the partial line", function()
+  local net = fake_net()
+  local c = client(net)
+  c:step()
+  net.short = true
+  local ok, why = c:send("hello")
+  eq(ok, false, "send")
+  eq(why, "send failed: partial write", "why")
+  eq(c.sock, nil, "closed")
 end)
 
 print(string.format("\n%d passed, %d failed", passed, failures))

@@ -22,9 +22,9 @@ Where the mGBA side stands. For the addresses see [../MEMORY_MAP.md](../MEMORY_M
 
 **Evolutions** (`lua/mons.lua`), from the same party scan: a known mon whose species differs from its last valid read, with the new species read the same with a valid checksum on two scans, sends `evolve {pid, from, to, nick?}`. `nick` is sent only when the game renamed the mon (it still had its species name). A change that keeps the species name is a form change and is only logged. Checked by running the tracker offline across the real Scatterbug → Spewpa savestates (`fixtures/private/r2-bag-before-candy.ss` → `r2-evolution-scene-spewpa.ss`, and → `r2-pokecenter-after-pc.ss` with the party reordered): one `evolve` each time. Confirmed live: Skitty → Delcatty with a Moon Stone (from the bag) sent one `evolve` with `nick: "Delcatty"`. A level-up evolution right after a battle is not tested live on purpose: Run & Bun runs level with the Endless Candy, so it rarely happens. The same scan would see it once the battle ends.
 
-Supporting modules: `lua/gen3.lua` (party struct decoding, names, flags, play time, run id, ROM check), `lua/addresses.lua`, `lua/json.lua`, `lua/tracker.lua` (mGBA entry point: ROM check, play-time-jump reset, `EVENT {json}` console output).
+Supporting modules: `lua/gen3.lua` (party struct decoding, names, flags, play time, run id, ROM check), `lua/addresses.lua`, `lua/json.lua`, `lua/relay_client.lua` (sends each event as a line over TCP to the relay on `127.0.0.1:38765`; reconnects every 2 s; drops events while disconnected; never writes after the relay closes, since SIGPIPE would kill mGBA), `lua/tracker.lua` (mGBA entry point: ROM check, play-time-jump reset, event ids, `EVENT {json}` console output and the relay connection).
 
-**Tests:** `npm run test:lua`, 50 scenarios on a fake memory, no emulator needed. Several replay frame sequences logged from real fights. The fake memory models the GBA bus's rotated misaligned reads. The identity check, the per-slot dedupe and the trainer-bit check were each broken on purpose to confirm a test fails.
+**Tests:** `npm run test:lua`, 55 scenarios on a fake memory, no emulator needed. Several replay frame sequences logged from real fights. The fake memory models the GBA bus's rotated misaligned reads. The identity check, the per-slot dedupe and the trainer-bit check were each broken on purpose to confirm a test fails.
 
 ## Behavior worth knowing
 
@@ -42,7 +42,7 @@ Supporting modules: `lua/gen3.lua` (party struct decoding, names, flags, play ti
 
 - **Trades** (next): a new party mon with another OT id is only logged today.
 - **`sync`**: snapshot (mons, defeated trainers, splits, play time) on script start and on any play-time discontinuity, so the sheet can reconcile after savestates.
-- **Relay**: TCP socket from Lua, the local daemon with a disk-backed queue, `id` stamping. Events currently only print to the mGBA console.
+- **Relay connection live**: `relay_client.lua` is written against mGBA 0.10.3's socket source and tested on a fake of its API, not yet in mGBA.
 - **Doubles credit**: `gBattlerAttacker` is not located, so doubles kills are credited to the leftmost live mon and flagged `ambiguous`.
 
 ## Not yet confirmed live

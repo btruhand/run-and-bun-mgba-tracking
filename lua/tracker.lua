@@ -1,16 +1,18 @@
 -- Run & Bun tracker for mGBA 0.10.3. Load with Tools > Scripting > File > Load script.
--- For now events are printed to the scripting console as `EVENT {json}` lines; the relay will take them from here.
+-- Each event is printed to the scripting console as `EVENT {json}` and sent over localhost TCP to relay/relay.mjs,
+-- which forwards it to the sheet. Events detected while the relay isn't running are not sent (the console says so).
 
 local dir = debug.getinfo(1, "S").source:match("^@(.*[/\\])") or TRACKER_DIR or "./"
 package.path = dir .. "?.lua;" .. package.path
 
 -- mGBA keeps `require`'s cache between script loads, so a reload would silently reuse old modules.
-for _, name in ipairs({ "addresses", "gen3", "json", "battle", "mons" }) do package.loaded[name] = nil end
+for _, name in ipairs({ "addresses", "gen3", "json", "battle", "mons", "relay_client" }) do package.loaded[name] = nil end
 
 local G = require("gen3")
 local J = require("json")
 local Battle = require("battle")
 local Mons = require("mons")
+local RelayClient = require("relay_client")
 
 local function log(msg) console:log(msg) end
 
@@ -23,16 +25,32 @@ end
 local play_time -- seconds, nil until a save is loaded
 local JUMP = 3  -- play time normally advances by at most 1 s between frames; more (or any decrease) is a load
 
+-- A reload replaces the connection; the old one would otherwise stay open until mGBA restarts.
+if TRACKER_RELAY then TRACKER_RELAY:close() end
+local relay = RelayClient.new(TRACKER_RELAY_PORT or 38765, function(msg) log("relay: " .. msg) end)
+TRACKER_RELAY = relay
+
+-- Event ids are `<run>:<session>.<n>`: the session is the clock when the script was first loaded in this mGBA, and
+-- both it and n survive reloading the script, so ids never repeat. The web app ignores ids it has already applied,
+-- which makes sending an event twice harmless.
+TRACKER_SESSION = TRACKER_SESSION or string.format("%x", os.time())
+TRACKER_SEQ = TRACKER_SEQ or 0
+
 local function emit(ev)
   ev.run = G.run_id(emu)
   ev.playTime = play_time
-  log("EVENT " .. J.encode(ev))
+  TRACKER_SEQ = TRACKER_SEQ + 1
+  ev.id = string.format("%s:%s.%d", tostring(ev.run), TRACKER_SESSION, TRACKER_SEQ)
+  local line = J.encode(ev)
+  local sent, why = relay:send(line)
+  log("EVENT " .. line .. (sent and "" or "  (not sent: " .. why .. ")"))
 end
 
 local battle = Battle.new(emu, emit, function(msg) log("battle: " .. msg) end)
 local mons = Mons.new(emu, emit, function(msg) log("mons: " .. msg) end)
 
 local function on_frame()
+  relay:step()
   local pt = G.play_time(emu)
   if pt == nil then return end
   if play_time and (pt < play_time or pt > play_time + JUMP) then

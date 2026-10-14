@@ -2,7 +2,7 @@
 
 Tooling to keep a Google Sheets kill tracker (the `Rankings` tab of the "R&B kill sheet") up to date automatically while playing Pokémon Run & Bun in a hardcore Nuzlocke.
 
-The long-term goal is for mGBA to feed the sheet directly; see [DESIGN.md](DESIGN.md) for the full design and [PROGRESS.md](PROGRESS.md) for what is done and what is left. **What exists today:** a refactored Apps Script project with a web app endpoint that accepts game events, and an mGBA Lua script that tracks battles (kills, deaths, splits), catches and evolutions. The Lua script prints events to the mGBA console; the relay that forwards them to the sheet is not built yet.
+The long-term goal is for mGBA to feed the sheet directly; see [DESIGN.md](DESIGN.md) for the full design and [PROGRESS.md](PROGRESS.md) for what is done and what is left. **What exists today:** a refactored Apps Script project with a web app endpoint that accepts game events, and an mGBA Lua script that tracks battles (kills, deaths, splits), catches and evolutions. The Lua script sends events over a local socket to a small relay, which forwards them to the sheet.
 
 ## What's here
 
@@ -19,6 +19,7 @@ lua/
   gen3.lua       Gen 3 decoding (party structs, names, flags, play time)
   addresses.lua  the Run & Bun 1.0.7 memory map
   json.lua       JSON encoder
+  relay_client.lua  sends events to the relay over localhost TCP
   spike/         read-only probes used to find the addresses
   dev/remote.lua remote control for experiments (see tools/README.md)
 docs/
@@ -28,6 +29,8 @@ scripts/
   gen-token.js   generates the shared secret
   setup-clasp.js asks for the prod and dev script IDs and writes the two clasp files
   deploy-dev.sh  pushes to the DEV sheet and (re)deploys the web app
+relay/
+  relay.mjs      forwards the tracker's events to the web app
 tools/
   remote.py      sends Lua chunks to lua/dev/remote.lua running in mGBA (see tools/README.md)
   state.py       reads RAM out of a savestate offline
@@ -39,6 +42,8 @@ tests/sheet/
 tests/lua/
   run.lua        tracker tests (no emulator needed)
   fakemem.lua    fake memory the tests write game structures into
+tests/relay/
+  relay.test.mjs relay tests (no network needed)
 fixtures/private/   your ROM / savestates (gitignored)
 ```
 
@@ -134,7 +139,7 @@ These run against the **dev** web app and take around two minutes (each request 
 
 ## Lua tracker
 
-Load `lua/tracker.lua` in mGBA 0.10.3 (Tools → Scripting → File → Load script) with Run & Bun 1.0.7 running. It checks the ROM's name tables first and refuses to start on anything else. Events appear in the scripting console as `EVENT {json}`:
+Load `lua/tracker.lua` in mGBA 0.10.3 (Tools → Scripting → File → Load script) with Run & Bun 1.0.7 running. It checks the ROM's name tables first and refuses to start on anything else. Each event appears in the scripting console as `EVENT {json}` and is sent to the [relay](#relay) if it is running (otherwise the line ends with `(not sent: relay not connected)`):
 
 | type | when |
 |------|------|
@@ -144,11 +149,32 @@ Load `lua/tracker.lua` in mGBA 0.10.3 (Tools → Scripting → File → Load scr
 | `catch` | a mon joined you: a battle ended with the mon caught (it is read from the party or box it was stored in, so the nickname is final), or a new mon with your OT id appeared in the party outside battle (the starter). `species`, `nick`, `location` (met location name) |
 | `evolve` | a known party mon's species changed, read the same with a valid checksum on two party scans (about a second apart). `from`, `to` are species names; `nick` is sent only when the game renamed the mon, which it does when the mon still had its species name (Scatterbug → Spewpa). A change that keeps the species name (a form change) is only logged |
 
-Events carry `run` (your trainer id) and `playTime`; `id` is added later by the relay. Kills in doubles use the leftmost live mon and set `ambiguous` when both of yours were alive (the attacker isn't read yet). A jump in play time (loading a savestate or a save) drops the current battle without emitting anything.
+Events carry `run` (your trainer id), `playTime` and an `id`, `<run>:<session>.<n>`, unique across script reloads and mGBA restarts; the web app skips ids it has already applied. Kills in doubles use the leftmost live mon and set `ambiguous` when both of yours were alive (the attacker isn't read yet). A jump in play time (loading a savestate or a save) drops the current battle without emitting anything.
 
 Mons already in the party and boxes when the script starts, or after loading a savestate or save, are treated as known and not sent: the sheet may already have them (hand-entered rows have no id), and `sync` will reconcile them. A mon is sent at most once per timeline, and the sheet ignores a catch for an id it already has. Catching a species you already have is sent as a new mon (and logged); evolution lines are not checked.
 
 Not detected yet: trades (a new party mon with another OT id is only logged), and the `sync` snapshot.
+
+## Relay
+
+`relay/relay.mjs` (Node, the version in `.nvmrc`; no packages) forwards the tracker's events to the web app in `WEB_APP_URL` with `TOKEN`, both from `.env`. Run it in a terminal while you play:
+
+```sh
+npm run relay                                 # or: node relay/relay.mjs
+node relay/relay.mjs --env .env.prod          # another sheet's URL and token
+```
+
+It listens on `127.0.0.1:38765`, checks the URL and token on start, and every 200 ms posts whatever has arrived as one request, logging what the web app did with each event (`sent 2: kill applied, death applied`). Start it before or after mGBA: the tracker connects within two seconds of the relay starting and reconnects if it restarts. The mGBA console shows `relay: connected on port 38765`.
+
+It is best effort and stores nothing. Events detected while the relay isn't running are not sent. If a request fails (no network, the web app erroring or refusing the token), the relay retries it 3 times, after about 1, 2 and 4 s (each ±50% at random); if that fails too, it drops those events and logs `GAVE UP`. Requests don't wait for each other, so a retried event can reach the sheet after a later one; if a kill lands before its mon's catch, the sheet ignores it and logs it to `_Issues` (and the relay shows `kill ignored (kill for unknown pid …)`). Fix the sheet by hand if that happens. Ctrl-C at any time; anything still waiting is dropped and the relay says how many.
+
+## Relay tests
+
+```
+npm run test:relay
+```
+
+They run the relay against a fake web app, no network: one request per tick, the web app down, refusing the token or failing, the 3 retries and their waits, dropping a request, a request being retried not holding up the next, the TCP server (lines split across reads, a line cut off by a disconnect, reconnects), and the Apps Script redirect over real HTTP.
 
 ## Lua tests
 
@@ -170,4 +196,4 @@ This is how catches, evolutions and PC moves were observed (the traces are in [d
 
 ## Not built yet
 
-See [DESIGN.md](DESIGN.md): detection of trades; the `sync` snapshot; and the local relay that forwards the Lua script's events to the web app.
+See [DESIGN.md](DESIGN.md): detection of trades and the `sync` snapshot.

@@ -6,8 +6,8 @@ Legend: `[x]` done and checked, `[~]` done but only partly checked (noted), `[ ]
 "Live" means confirmed in mGBA during play. "Dev sheet" means confirmed on the copy of the spreadsheet, not the real one.
 
 ```
-mGBA (Lua tracker) ──NDJSON/TCP──▶ relay (not built) ──HTTPS──▶ Apps Script web app ──▶ Rankings sheet
-   battle done                                                    done on dev copy
+mGBA (Lua tracker) ──NDJSON/TCP──▶ relay ──HTTPS──▶ Apps Script web app ──▶ Rankings sheet
+   done                              done             done on dev copy
 ```
 
 ## Summary
@@ -15,10 +15,10 @@ mGBA (Lua tracker) ──NDJSON/TCP──▶ relay (not built) ──HTTPS──
 | Area | State |
 |------|-------|
 | Game data (RAM / ROM map) | Party, battle, flags, names, PC boxes and screen ids found; catch and evolution behavior observed live. Doubles attacker still open |
-| Lua tracker | Battles (kills, deaths, splits) and catches including the starter done and live. Evolutions done and live. Trades, `sync`, output to the relay not started |
-| Relay | Not started |
+| Lua tracker | Battles (kills, deaths, splits) and catches including the starter done and live. Evolutions done and live. Output to the relay done (not yet live in mGBA). Trades, `sync` not started |
+| Relay | Done (TCP, best effort, nothing stored); tested with a fake web app, and once by hand end to end against the dev sheet |
 | Apps Script / sheet | Web app, journal and reconcile done and tested on the dev sheet. Not on the real sheet |
-| Testing | Sheet tests (14) and Lua tests (50) pass. Remote control for in-emulator checks exists; no automated emulator-in-the-loop or end-to-end test |
+| Testing | Sheet tests (18), Lua tests (55) and relay tests (12) pass. Remote control for in-emulator checks exists; no automated emulator-in-the-loop or end-to-end test |
 | Rollout to the real sheet | Not started |
 
 ## 1. Game data (RAM / ROM)
@@ -40,7 +40,7 @@ Details: [docs/MEMORY_MAP.md](docs/MEMORY_MAP.md), method in [docs/lua_progress/
 
 ## 2. Lua tracker (`lua/`)
 
-- [x] Entry point `tracker.lua`: ROM check, play-time-jump reset, `EVENT {json}` console output
+- [x] Entry point `tracker.lua`: ROM check, play-time-jump reset, `EVENT {json}` console output, event ids
 - [x] `gen3.lua`, `addresses.lua`, `json.lua`
 - [x] Battle tracker `battle.lua`
   - [x] `kill`: trainer battles only, credited to the mon on the field, identity check against switch-in glitches, one credit per enemy slot (live)
@@ -55,19 +55,20 @@ Details: [docs/MEMORY_MAP.md](docs/MEMORY_MAP.md), method in [docs/lua_progress/
 - [ ] **Trades**: tracked id replaced by an unknown id with a different OT in the same slot. In Run & Bun gift mons come from NPC trades, so they always land in the party (no gift-to-PC case). To check on a real trade: the met location (vanilla uses 254, "in-game trade", which the map table doesn't cover) and the slot transition on the trade screen
 - [ ] **`sync`**: snapshot of mons, defeated trainers, splits and play time on script start and on any play-time discontinuity (today a jump only resets the battle tracker silently)
 - Not needed: new-run detection. Starting a new run is manual (Reset Run on the sheet); the Lua side just sends events with the current trainer id as `run`
-- [ ] Output to the relay: socket client with reconnect (mGBA 0.10.3's `socket` API is not yet verified)
+- [~] Output to the relay (`relay_client.lua`): TCP to `127.0.0.1:38765`, reconnect every 2 s, events dropped while disconnected; never writes after the relay closes (SIGPIPE would kill mGBA); ids `<run>:<session>.<n>` stamped in `tracker.lua`. Written against mGBA 0.10.3's socket source; tested on a fake of its API and with `tracker.lua` on fake memory; not yet live in mGBA
 - [ ] Cheaper battle reads (fetch HP first, the rest only on change). Optional; do it with the party scans
 - [ ] Doubles: use `gBattlerAttacker` once found, then drop `ambiguous`
 - [ ] `indirect` flag on kills (needs the attacker)
 
-## 3. Relay (`relay/`, not created)
+## 3. Relay (`relay/relay.mjs`)
 
-- [ ] Localhost TCP listener for the Lua script's newline-delimited JSON
-- [ ] Stamp event ids (`<run>:<seq>`), sequence persisted across restarts
-- [ ] Disk-backed queue, retries, batching
-- [ ] HTTPS POST to the web app with the shared token (stdlib Python)
-- [ ] Config from `.env` (web app URL, token), start/stop instructions
-- [ ] Tests (fake web app endpoint, restart and offline cases)
+- [x] TCP server on `127.0.0.1:38765` for the tracker's newline-delimited JSON; never writes back
+- [x] Ids are stamped by the tracker, not the relay (nothing to persist)
+- [x] In-memory queue taken every 200 ms and sent as one independent request; a failed request retried 3 times (after 1, 2, 4 s, ±50% jitter), then its events dropped. Best effort by choice: nothing to clean up, no stale events after a Reset Run, no request held up behind a failing one (a retried event can land after a later one; the sheet logs a kill that beats its catch)
+- [x] HTTPS POST to the web app with the shared token (Node, no packages), follows the Apps Script redirect
+- [x] Config from `.env` (`WEB_APP_URL`, `TOKEN`; `--env` for another file, `--port`), start-up check of URL and token
+- [x] Tests (`npm run test:relay`): fake web app, offline, refused token, broken script, retries and dropping, TCP framing and disconnects (mutation-checked)
+- [x] End to end by hand against the dev sheet over TCP: catch, kill and a repeated catch → row added, KC 1, duplicate skipped
 
 ## 4. Apps Script / sheet (`appsscript/`)
 
@@ -96,7 +97,8 @@ Done and tested on the **dev copy** only.
 - [x] Tests for catches and evolutions
 - [ ] Tests for trades and `sync` as they are written
 - [ ] Emulator-in-the-loop test: mGBA with the ROM and a fixture state, assert on the emitted events. 0.10.3 has no `--script` flag, but the remote can load states and drive the game once loaded
-- [ ] End-to-end test: Lua output → relay → dev web app → sheet
+- [x] `npm run test:relay`: 12 relay tests (`node:test`), no network
+- [~] End-to-end: Lua output → relay → dev web app → sheet, run once by hand (not automated; the Lua part on fake memory and a fake socket)
 - [ ] `tools/replay.py` to post recorded event streams (from the design; may not be needed)
 
 ## 6. Rollout to the real sheet
@@ -110,13 +112,14 @@ Done and tested on the **dev copy** only.
 
 - [x] README, MEMORY_MAP, lua_progress, this file
 - [x] DESIGN.md refreshed to match what is built: a badge increase advances the split (read as the number of defeated gym leaders; the web app sets `Badges`), field-mon kill credit with `ambiguous` in doubles, catch and evolution detection, what is not built yet
-- [ ] README sections for the relay and the captures once they exist
+- [x] README section for the relay
+- [ ] README section for the captures once they exist
 
 ## Suggested order
 
 1. **Catches** done and live
 2. **Evolutions** done; **trades** next (same party scan)
 3. **`sync`**
-4. **Relay**, plus the Lua socket output; first end-to-end run against the dev sheet
+4. **Relay** done, plus the Lua socket client; next, a live session with the tracker and relay against the dev sheet
 5. Roll out to the real sheet; first real leader win confirms the `split` flow
 6. Doubles attacker and polish
