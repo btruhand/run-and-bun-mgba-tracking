@@ -216,12 +216,12 @@ test("a self-KO on the same frame still credits your mon", function()
 end)
 
 test("beating a gym leader: the fight counts for the current split, then a split event fires", function()
-  local w = world({ opponent = 266, enemies = { SWIRLIX } }) -- Brawly
-  w.mem:trainer_flag(265)                             -- Roxanne already beaten
+  local w = world({ opponent = 265, enemies = { SWIRLIX } }) -- Roxanne, the second gym in Run & Bun
+  w.mem:trainer_flag(266)                             -- Brawly already beaten
   w.begin()
   w.enemy(0, SWIRLIX, 0)
   eq(w.events[1].split, 2, "kill split")
-  w.mem:trainer_flag(266)                             -- the game sets the flag as the battle ends
+  w.mem:trainer_flag(265)                             -- the game sets the flag as the battle ends
   w.finish()
   eq(types(w.events), "kill,split", "events")
   eq(w.events[2].badges, 2, "badges")
