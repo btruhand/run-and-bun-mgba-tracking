@@ -87,11 +87,10 @@ end
 
 function G.species_name(mem, id) return G.decode_string(mem, A.species_names + id * 11, 11) end
 
--- RAM trainer id -> name (gTrainers is indexed by id + 1).
+-- RAM trainer id -> name.
 function G.trainer_name(mem, id)
-  local entry = id + A.trainer_entry_offset
-  if entry < 0 or entry >= A.trainer_count then return "" end
-  return G.decode_string(mem, A.trainers + entry * A.trainer_stride, 12)
+  if id < 0 or id >= A.trainer_count then return "" end
+  return G.decode_string(mem, A.trainers + id * A.trainer_stride, 12)
 end
 
 function G.map_name(mem, id)

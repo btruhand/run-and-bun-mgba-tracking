@@ -33,13 +33,12 @@ return {
 
   -- ROM tables
   species_names  = 0x083a0f80, -- 11 bytes per name, indexed by species id
-  trainers       = 0x08398884, -- gTrainers, name field of entry 0
+  trainers       = 0x08398884, -- gTrainers, name field of entry 0; indexed by RAM trainer id
   trainer_stride = 0x28,
   trainer_count  = 865,
-  trainer_entry_offset = 1,    -- gTrainers entry = RAM trainer id + 1 (checked on four trainers)
   map_names      = 0x086a1960, -- 8-byte entries, name pointer at +4, indexed by met location
   map_count      = 213,
 
   -- RAM trainer ids of the eight gym leaders (Roxanne .. Juan); the split is how many of these are defeated
-  gym_leaders = { 264, 265, 266, 267, 268, 269, 270, 271 },
+  gym_leaders = { 265, 266, 267, 268, 269, 270, 271, 272 },
 }

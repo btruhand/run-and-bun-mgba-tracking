@@ -71,9 +71,9 @@ function F:map_name(id, name)
   self:write_string(str, name, 30)
 end
 
--- RAM trainer id -> the gTrainers entry (id + 1) holds the name
+-- RAM trainer id -> the gTrainers entry with the same index holds the name
 function F:trainer_name(id, name)
-  self:write_string(A.trainers + (id + A.trainer_entry_offset) * A.trainer_stride, name, 12)
+  self:write_string(A.trainers + id * A.trainer_stride, name, 12)
 end
 
 -- Party structs --------------------------------------------------------------------------------------------

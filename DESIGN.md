@@ -129,7 +129,7 @@ In Run & Bun, gift mons come from NPC trades, and a traded mon always lands in t
 
 ### Split
 - After each battle, count the defeated gym leaders (see Splits). If the count went up, send `split {badges}`.
-- The leader ids (264–271) come from the ROM's trainer table and haven't been confirmed against a real leader fight yet.
+- The leader ids (265–272) come from the ROM's trainer table and haven't been confirmed against a real leader fight yet.
 
 ## Event schema
 

@@ -22,7 +22,8 @@ A small Lua harness (a mock `emu` reading from the ROM file and a decompressed s
 | Map names | Pointer table at `0x086a1960`, 8-byte entries; met location id indexes it; `255` is "Fateful Encounter" (the starter) |
 | Four savestates | `gBattleMons` at `0x020233fc` (entry size `0x5c`), `gEnemyParty` at `0x02023cf0`, `gMain.inBattle` at `+0x439`; `BattleMon` field offsets from matching the party mon's stats |
 | Two overworld states either side of a fight | Four bits changed in SaveBlock1. Opponent id candidate `0x020381ae` (0 before a fight, 318 during and after). Bit `318 % 8 = 6` of byte `318 / 8 = 39` lined up with one of the four changes, fixing the flag block at `sb1 + 0x16b4` |
-| Matching enemy parties against `gTrainers` | Trainer 318 is not "Calvin" (entry 318): the enemy party matches entry 319. Repeated on trainers 603, 615 and 333: RAM id = entry − 1 every time |
+| Matching enemy parties against `gTrainers` | Concluded RAM id = entry − 1 (318 → entry 319, also 603, 615, 333). **Wrong**, see the next row |
+| Live fight with trainer 318 (2026-10-14) | The game showed "Youngster Calvin" while the tracker named the trainer "Mikey". Entry 318 is Calvin and its party pointer at `name + 0x20` lists the enemy team (Poochyena, Lillipup, Rookidee); the earlier match read the party fields at `name - 0xC` / `name - 8`, which belong to the previous entry. Flag bit 318 set by the win. RAM id = entry; gym leader ids corrected from 264-271 to 265-272 |
 | Probe 2 in mGBA | Confirmed flag bytes at `0x16db`, `0x16ff`, `0x1700`, `0x16dd` for ids 318, 603, 615, 333; `gBattleTypeFlags` `0x08` for trainers |
 | Kill detection | First version counted any `hp > 0 → 0`. Live traces showed false kills on switch-ins (see below). Fixed with the identity check |
 | Tracker | Run id came back as `0x000140AF`. Two causes in sequence: a misaligned `read32` (GBA bus rotates it), and mGBA's `require` cache keeping the old module after a reload. Final: `0xF9D040AF` |

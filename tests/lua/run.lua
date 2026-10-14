@@ -216,12 +216,12 @@ test("a self-KO on the same frame still credits your mon", function()
 end)
 
 test("beating a gym leader: the fight counts for the current split, then a split event fires", function()
-  local w = world({ opponent = 265, enemies = { SWIRLIX } })
-  w.mem:trainer_flag(264)                             -- first leader already beaten
+  local w = world({ opponent = 266, enemies = { SWIRLIX } }) -- Brawly
+  w.mem:trainer_flag(265)                             -- Roxanne already beaten
   w.begin()
   w.enemy(0, SWIRLIX, 0)
   eq(w.events[1].split, 2, "kill split")
-  w.mem:trainer_flag(265)                             -- the game sets the flag as the battle ends
+  w.mem:trainer_flag(266)                             -- the game sets the flag as the battle ends
   w.finish()
   eq(types(w.events), "kill,split", "events")
   eq(w.events[2].badges, 2, "badges")
@@ -690,16 +690,18 @@ test("trainer flags: id 615 is byte 0x1700 bit 7, id 333 is byte 0x16dd bit 5", 
   eq(G.trainer_flag(m, 616), false, "616 read")
 end)
 
-test("leaders defeated counts only the eight gym leaders", function()
+test("leaders defeated counts only the eight gym leaders, Roxanne (265) to Juan (272)", function()
   local m = Fake.new()
-  m:trainer_flag(264) m:trainer_flag(271) m:trainer_flag(318)
+  m:trainer_flag(265) m:trainer_flag(272)
+  m:trainer_flag(264) m:trainer_flag(273) m:trainer_flag(318) -- Drake, Jerry, Calvin
   eq(G.leaders_defeated(m), 2, "count")
 end)
 
-test("trainer names come from entry id + 1", function()
+test("trainer names come from the gTrainers entry with the same index as the RAM id", function()
   local m = Fake.new()
-  m:trainer_name(615, "Lyle")
-  eq(G.trainer_name(m, 615), "Lyle", "name")
+  m:trainer_name(318, "Calvin")
+  m:trainer_name(319, "Mikey")
+  eq(G.trainer_name(m, 318), "Calvin", "name")
 end)
 
 test("met location 255 reads as Fateful Encounter", function()

@@ -47,6 +47,6 @@ Supporting modules: `lua/gen3.lua` (party struct decoding, names, flags, play ti
 
 ## Not yet confirmed live
 
-- A **gym leader win**. The leader ids (264-271) come from the trainer table, not from a fight. The first win should produce `kill … split: N` followed by `split {badges: N}`.
+- A **gym leader win**. The leader ids (265-272) come from the trainer table, not from a fight. The first win should produce `kill … split: N` followed by `split {badges: N}`.
 - **Double battles**: handled in code and in tests, never seen in play.
 - A mid-battle faint followed by a **blackout** (whole party wiped) in a wild fight.

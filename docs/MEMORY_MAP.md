@@ -85,24 +85,24 @@ Values seen: overworld (also with the start menu open) `0x080a3e6d`, bag `0x081d
 |------|-------------|--------|-------|
 | Species names | `0x083a0f80` | live | 11 bytes each, indexed by species id |
 | Map section names | `0x086a1960` | state | 213 entries of 8 bytes, name pointer at `+4`, indexed by met location |
-| `gTrainers` | `0x08398884` (name field of entry 0) | live | 865 entries of `0x28` bytes. Party size u32 at `name - 0xC`, party pointer at `name - 8` |
+| `gTrainers` | `0x08398884` (name field of entry 0) | live | 865 entries of `0x28` bytes, indexed by RAM trainer id. Party size at `name + 0x1C`, party pointer at `name + 0x20` |
 
-**RAM trainer id = `gTrainers` index − 1.** The game's `gTrainerBattleOpponent_A` is one less than the table entry holding that trainer's party. Confirmed on four trainers by matching the enemy party against the table: 318 → Mikey (319), 603 → Haley (604), 615 → Lyle (616), 333 → Gavi (334). Trainer flags use the RAM id.
+**RAM trainer id = `gTrainers` index.** `gTrainerBattleOpponent_A` indexes the table directly, as in vanilla. Confirmed live on trainer 318: the game shows "Youngster Calvin", entry 318's name is Calvin, its party pointer (`name + 0x20`) lists Calvin's Poochyena, Lillipup and Rookidee, and winning sets flag bit 318. An earlier reading took the party fields at `name - 0xC` / `name - 8`, which are the end of the *previous* entry, and concluded the id was one less than the entry; that was wrong. Trainer flags use the same id.
 
-Gym and League trainers (RAM ids, derived from the table with the −1 offset; **not yet seen live** — the first gym leader win will confirm them):
+Gym and League trainers (RAM id = table index; **not yet seen live** — the first gym leader win will confirm them):
 
-| Trainer | Table index | RAM id |
-|---------|-------------|--------|
-| Roxanne | 265 | 264 |
-| Brawly | 266 | 265 |
-| Wattson | 267 | 266 |
-| Flannery | 268 | 267 |
-| Norman | 269 | 268 |
-| Winona | 270 | 269 |
-| Tate & Liza | 271 | 270 |
-| Juan | 272 | 271 |
-| Sidney, Phoebe, Glacia, Drake | 261-264 | 260-263 |
-| Wallace | 335 | 334 |
+| Trainer | RAM id |
+|---------|--------|
+| Roxanne | 265 |
+| Brawly | 266 |
+| Wattson | 267 |
+| Flannery | 268 |
+| Norman | 269 |
+| Winona | 270 |
+| Tate & Liza | 271 |
+| Juan | 272 |
+| Sidney, Phoebe, Glacia, Drake | 261-264 |
+| Wallace | 335 |
 
 Table entries 770-801 repeat each leader in groups of four, and 844-847 repeat the Elite Four. They look like rematch or variant entries, not first fights.
 
