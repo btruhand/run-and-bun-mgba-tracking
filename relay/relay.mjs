@@ -91,6 +91,8 @@ export class Relay {
       resp = JSON.parse(text);
     } catch {}
     if (!resp || typeof resp !== 'object') {
+      const crash = scriptError(text);
+      if (crash) throw new WebAppError(`script failed: ${crash}`);
       throw new WebAppError(`answered HTTP ${status} without JSON: ${text.split(/\s+/).join(' ').slice(0, 120)}`);
     }
     if (resp.ok) return resp;
@@ -137,6 +139,17 @@ export class Relay {
       this.sending -= batch.length;
     }
   }
+}
+
+// The exception in the page Apps Script answers with (HTTP 200) when doPost throws, e.g.
+// `TypeError: Cannot read properties of null (reading 'token') (line 35, file "WebApp")`, or null for any other page.
+// The page shows it in the last <div>, after the logo's.
+export function scriptError(html) {
+  if (!html.includes('<title>Error</title>')) return null;
+  const divs = [...html.matchAll(/<div[^>]*>([^<]+)<\/div>/g)];
+  if (!divs.length) return null;
+  const entities = { amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'" };
+  return divs.at(-1)[1].replace(/&(amp|lt|gt|quot|#39);/g, (_, e) => entities[e]).trim();
 }
 
 export function summarize(batch, results) {

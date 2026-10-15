@@ -9,14 +9,21 @@ const ev = (n, type = 'kill', run = '0xRUN') => ({ id: `${run}:s.${n}`, run, pla
 const line = (e) => JSON.stringify(e);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// What Apps Script answers (HTTP 200) when doPost throws, trimmed.
+const CRASH_PAGE = '<!DOCTYPE html><html><head><script nonce="x">window[\'ppConfig\'] = {};</script><title>Error</title></head>'
+  + '<body style="margin:20px"><div><img alt="Google Apps Script" src="//ssl.gstatic.com/docs/script/images/logo.png"></div>'
+  + '<div style="text-align:center;font-family:monospace">TypeError: Cannot read properties of null (reading &#39;token&#39;)'
+  + ' (line 35, file &quot;WebApp&quot;)</div></body></html>';
+
 // Stands in for the web app: dedupes by id, and can be told to be down, refuse the token or fail.
 function fakeWebApp() {
-  const web = { seen: [], requests: [], down: false, badToken: false, broken: false };
+  const web = { seen: [], requests: [], down: false, badToken: false, broken: false, garbage: false };
   web.post = async (url, body) => {
     if (web.down) throw new TypeError('fetch failed', { cause: { code: 'ECONNREFUSED' } });
     web.requests.push(body.events.map((e) => e.id));
     if (web.badToken) return [200, JSON.stringify({ ok: false, error: 'unauthorized' })];
-    if (web.broken) return [200, '<html><body>TypeError: Cannot read properties of null</body></html>'];
+    if (web.broken) return [200, CRASH_PAGE];
+    if (web.garbage) return [200, '<html><body>Bad gateway</body></html>'];
     const results = body.events.map((e) => {
       const dup = web.seen.includes(e.id);
       if (!dup) web.seen.push(e.id);
@@ -99,16 +106,17 @@ describe('relay queue', () => {
     assert.deepEqual(web.seen, ['0xRUN:s.2', '0xRUN:s.1'], 'the retried event lands after the later one');
   });
 
-  test('a refused token or a broken script is retried, then given up on', async () => {
-    for (const flag of ['badToken', 'broken']) {
+  test('a refused token, a broken script or a page that is not JSON is retried, then given up on', async () => {
+    for (const flag of ['badToken', 'broken', 'garbage']) {
       web[flag] = true;
       r.receive(line(ev(1)));
       assert.equal(await r.tick(), false, flag);
       web[flag] = false;
     }
-    assert.equal(web.requests.length, 8, '4 attempts each');
+    assert.equal(web.requests.length, 12, '4 attempts each');
     assert.ok(logged('web app refused the token'));
-    assert.ok(logged('web app answered HTTP 200 without JSON'));
+    assert.ok(logged(`web app script failed: TypeError: Cannot read properties of null (reading 'token') (line 35, file "WebApp")`));
+    assert.ok(logged('web app answered HTTP 200 without JSON: <html><body>Bad gateway</body></html>'));
   });
 
   test('a retry after a request that did reach the sheet applies nothing twice', async () => {
