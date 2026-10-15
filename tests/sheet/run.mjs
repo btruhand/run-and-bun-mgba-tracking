@@ -2,6 +2,7 @@
 // Usage: npm run test:sheet [-- --dump]   (--dump prints the final state of each scenario)
 import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
+import { scriptError } from '../../relay/relay.mjs';
 
 const env = Object.fromEntries(
   readFileSync(new URL('../../.env.dev', import.meta.url), 'utf8')
@@ -12,10 +13,23 @@ const verbose = process.argv.includes('--dump');
 const onlyIdx = process.argv.indexOf('--only');
 const only = onlyIdx > 0 ? process.argv[onlyIdx + 1] : null;
 
+// Follows the redirects by hand (Apps Script answers a POST with one to the result) so a failure can say where it went.
 async function call(body) {
-  const res = await fetch(URL_, { method: 'POST', redirect: 'follow', headers: { 'content-type': 'text/plain' }, body: JSON.stringify({ token: TOKEN, ...body }) });
-  const json = await res.json();
-  assert.ok(json.ok, `request failed: ${JSON.stringify(json)}`);
+  const hops = [];
+  let res = await fetch(URL_, { method: 'POST', redirect: 'manual', headers: { 'content-type': 'text/plain' }, body: JSON.stringify({ token: TOKEN, ...body }) });
+  while (res.status >= 300 && res.status < 400 && hops.length < 5) {
+    const to = new URL(res.headers.get('location'), res.url || URL_);
+    hops.push(`${res.status} -> ${to.host}${to.pathname}`);
+    res = await fetch(to, { redirect: 'manual' });
+  }
+  const text = await res.text();
+  let json = null;
+  try {
+    json = JSON.parse(text);
+  } catch {}
+  const where = `(HTTP ${res.status}; ${hops.join(', ') || 'no redirect'})`;
+  assert.ok(json, `not JSON ${where}: ${scriptError(text) || text.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>|<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 200)}`);
+  assert.ok(json.ok, `request failed ${where}: ${JSON.stringify(json)}`);
   return json;
 }
 const reset = () => call({ action: 'reset' });
@@ -163,13 +177,81 @@ const scenarios = {
     assert.match((await undo()).undone, /^KO by/);
     const s = await dump();
     assert.equal(byId(s, A).total, 0);
-    assert.deepEqual(s.journal.map((j) => [j.type, j.playTime, j.active]), [['catch', 10, true], ['kill', 200, false], ['catch', 110, true]]);
+    assert.deepEqual(s.journal.map((j) => [j.type, j.playTime, j.active, j.status]),
+      [['catch', 10, true, 'applied'], ['kill', 200, false, 'applied'], ['sync', 100, false, 'reconciled'], ['catch', 110, true, 'applied']]);
   },
   async 'an undone event stays undone through a later sync'() {
     await send(catchEv(10, A, 'Piplup'), killEv(20, A, 1, 't1'));
     await undo();
     await send(sync(100, [mon(A, 'Piplup')], { defeated: ['t1'], complete: true }));
     assert.equal(byId(await dump(), A).total, 0);
+  },
+  // These two rely on the Species column's dropdown rejecting what isn't on its list, as it does on the template.
+  async 'an event that throws is logged to _Issues and the rest of the request still applies'() {
+    await send(catchEv(10, A, 'Sizzlipede'));
+    const results = await send(ev('evolve', 20, { pid: A, from: 'Sizzlipede', to: 'Centskorch' }), killEv(21, A, 1, 't1'));
+    assert.deepEqual(results.map((r) => r.status), ['failed', 'applied']);
+    assert.match(results[0].reason, /violates the data validation rules/);
+    const s = await dump();
+    assert.deepEqual([byId(s, A).species, byId(s, A).total], ['Sizzlipede', 1]);
+    assert.equal(s.issues.length, 1);
+    assert.match(s.issues[0], /^evolve failed: The data you entered in cell I\d+ violates the data validation rules .*\(WebApp:\d+\)$/);
+    assert.deepEqual(s.journal.map((j) => [j.type, j.status, j.issues]), [['catch', 'applied', ''], ['evolve', 'failed', '2'], ['kill', 'applied', '']],
+      'the failed event is recorded, pointing at its issue (row 2 of _Issues)');
+  },
+  async 'a sync step that throws is logged and the rest of the sync still applies'() {
+    await send(catchEv(10, A, 'Sizzlipede'), catchEv(11, B, 'Zigzagoon'));
+    const results = await send(sync(100, [mon(A, 'Centskorch'), mon(B, 'Linoone', { nick: 'Zoomer' })], { badges: 2 }));
+    assert.deepEqual(results.map((r) => r.status), ['reconciled']);
+    const s = await dump();
+    assert.equal(byId(s, A).species, 'Sizzlipede');
+    assert.deepEqual([byId(s, B).species, byId(s, B).nick], ['Linoone', 'Zoomer']);
+    assert.equal(s.panel.badges, 2);
+    assert.equal(s.issues.length, 1);
+    assert.match(s.issues[0], /^sync could not update 0xA:1: The data you entered in cell I\d+ violates/);
+    assert.deepEqual(s.journal.at(-1), { id: '', type: 'sync', pid: '', playTime: 100, active: false, status: 'reconciled', issues: '2' });
+  },
+  async 'every event is recorded in _Events with its status and issues'() {
+    await send(catchEv(10, A, 'Piplup'));
+    const other = { id: 'other:1', run: 'other', playTime: 30, type: 'catch', pid: C, species: 'Ralts', nick: '', location: 'Route 102' };
+    const results = await send(killEv(20, B, 1, 't1'), { run: RUN, playTime: 25, type: 'death', pid: A }, other);
+    assert.deepEqual(results.map((r) => r.status), ['ignored', 'rejected', 'held']);
+    const s = await dump();
+    assert.deepEqual(s.journal.map((j) => [j.type, j.status, j.active, j.issues]), [
+      ['catch', 'applied', true, ''], ['kill', 'ignored', false, '2'], ['death', 'rejected', false, '3'], ['catch', 'held', false, '4'],
+    ]);
+    assert.match(s.issues[0], /^kill for unknown pid/);
+    assert.match(s.issues[1], /^rejected death without an id/);
+    assert.match(s.issues[2], /^event from different run/);
+    assert.equal(s.issues.length, 3);
+    assert.equal(byId(s, A).status, 'Alive');
+  },
+  async 'a resent event that was not applied is handled again in its own row; an applied one is a duplicate'() {
+    await send(catchEv(10, A, 'Sizzlipede'));
+    const kill = killEv(20, B, 1, 't1'); // its mon's catch hasn't arrived yet
+    const evolve = ev('evolve', 30, { pid: A, from: 'Sizzlipede', to: 'Centskorch' }); // the dropdown rejects it
+    assert.deepEqual((await send(kill, evolve)).map((r) => r.status), ['ignored', 'failed']);
+    await send(catchEv(15, B, 'Zigzagoon'));
+    assert.deepEqual((await send(kill, evolve)).map((r) => r.status), ['applied', 'failed']);
+    assert.deepEqual((await send(kill)).map((r) => r.status), ['duplicate']);
+    const s = await dump();
+    assert.equal(byId(s, B).total, 1, 'the kill counted once');
+    assert.deepEqual(s.journal.map((j) => [j.type, j.status, j.active, j.issues]), [
+      ['catch', 'applied', true, ''], ['kill', 'applied', true, '2'], ['evolve', 'failed', false, '3, 4'], ['catch', 'applied', true, ''],
+    ]);
+    assert.equal(s.issues.length, 3);
+  },
+  async 'an issue from rewinding an earlier event is referenced from that event too'() {
+    await send(catchEv(10, A, 'Scatterbug'), ev('evolve', 20, { pid: A, from: 'Scatterbug', to: 'Spewpa' }));
+    await send(sync(100, [mon(A, 'Silcoon')])); // the sheet now says Silcoon, so undoing the evolution is skipped
+    await send(sync(15, [mon(A, 'Scatterbug')]));
+    const s = await dump();
+    assert.equal(s.issues.length, 1);
+    assert.match(s.issues[0], /^skipped undo: species of 0xA:1 was edited/);
+    assert.deepEqual(s.journal.map((j) => [j.type, j.playTime, j.active, j.issues]), [
+      ['catch', 10, true, ''], ['evolve', 20, false, '2'], ['sync', 100, false, ''], ['sync', 15, false, '2'],
+    ]);
+    assert.equal(byId(s, A).species, 'Scatterbug', 'the sync still sets what the game has');
   },
   async 'sorting keeps row formulas pointing at their own row'() {
     await send(catchEv(10, A, 'Piplup'), catchEv(11, B, 'Zigzagoon'), catchEv(12, C, 'Ralts'));

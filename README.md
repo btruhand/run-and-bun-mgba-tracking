@@ -145,11 +145,11 @@ Every event has `id` (unique; repeats are ignored), `run` (identifies the save/r
 
 `pid` is the personality value plus original-trainer ID (`"0xA1B2C3D4:0x1234ABCD"`), which stays the same through evolution and nickname changes. Rows move on every sort, so the sheet always finds a Pokémon by this ID.
 
-Responses: `{ok: true, results: [{id, status}]}` where status is `applied`, `duplicate`, `ignored` or `held` (event from a different run; press Reset Run to switch).
+Responses: `{ok: true, results: [{id, status}]}` where status is `applied`, `duplicate`, `ignored` (unknown mon, full table), `failed` (the script threw while applying it, e.g. the sheet rejected a value), `held` (event from a different run; press Reset Run to switch) or `rejected` (no type, run or id). An error outside any one event (the lock, opening the sheet) answers `{ok: false, error: <message>}`.
 
 ### Event log and `sync`
 
-Every applied event is recorded in a hidden `_Events` tab together with how to undo it. Problems (unknown mon, full table, skipped undo) go to a hidden `_Issues` tab.
+Every event the web app receives is recorded in a hidden `_Events` tab, with its `status` (as in the response; a sync is `reconciled`) and, for applied ones, how to undo it. A resent event that was applied is answered `duplicate`; one that wasn't (`failed`, `ignored`, `held`) is handled again, for example when the relay retries a request whose answer was lost, and its row is updated, keeping the links to the earlier issues. Problems go to a hidden `_Issues` tab: unknown mon, full table, skipped undo, and any error the script hits, with its message. An event's `issue reference` column lists the `_Issues` rows about it, each a link to its row. Only `applied` events are rewound, re-applied or undone.
 
 **Undo latest tracking change** (`AA11`) reverts the newest event in `_Events` that changed the sheet and deletes it from the log, so a later `sync` can't bring it back. Each press undoes one more; a toast says what was undone. Events already undone by a rewind are skipped. If you edited the affected cells by hand since, your edit is kept and the skip is logged to `_Issues`. If the mon's row is gone (cleared by hand), nothing changes but the event is still removed from the log, and the toast says so. A deleted event's id is forgotten, so if the same event were sent again it would be applied again.
 
@@ -185,7 +185,7 @@ npm run test:sheet -- --only rewind   # scenarios whose name contains "rewind"
 npm run test:sheet -- --dump          # also print sheet state after each scenario
 ```
 
-These run against the **dev** web app (`WEB_APP_URL` and `TOKEN` from `.env.dev`) and take around two minutes (each request takes a few seconds). Each scenario resets the dev sheet first and again at the end. They cover catches, kills and sorting, deaths, evolutions, trades, splits, rewinds and forward jumps via `sync`, killer re-attribution, run mismatches, duplicate events, and that row formulas (including the `U:W` bar graph) still reference their own row after a sort.
+These run against the **dev** web app (`WEB_APP_URL` and `TOKEN` from `.env.dev`) and take around two minutes (each request takes a few seconds). Each scenario resets the dev sheet first and again at the end. They cover catches, kills and sorting, deaths, evolutions, trades, splits, rewinds and forward jumps via `sync`, killer re-attribution, run mismatches, duplicate events, errors in an event or a sync step going to `_Issues` without stopping the rest, every event's `_Events` row with its status and issue reference, and that row formulas (including the `U:W` bar graph) still reference their own row after a sort.
 
 ## Lua tracker
 

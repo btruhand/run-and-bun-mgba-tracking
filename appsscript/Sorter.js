@@ -3,11 +3,17 @@ function onEdit(e) {
   var sheet = range.getSheet();
   var name = sheet.getName();
 
-  if (name === RANKINGS) onEditRankings_(e, sheet, range);
-  else if (name === "Planner") onEditPlanner_(e, sheet, range);
-  else if (name === "Preparation") onEditPreparation_(e, sheet, range);
+  try {
+    if (name === RANKINGS) onEditRankings_(e, sheet, range);
+    else if (name === "Planner") onEditPlanner_(e, sheet, range);
+    else if (name === "Preparation") onEditPreparation_(e, sheet, range);
 
-  if (name === RANKINGS) sortRankings(sheet);
+    if (name === RANKINGS) sortRankings(sheet);
+  } catch (err) {
+    var where = name + '!' + range.getA1Notation();
+    logIssue_(null, 'edit of ' + where + ' failed: ' + errorText_(err), null);
+    e.source.toast('Something went wrong handling the edit of ' + where + '; see _Issues.', 'Error');
+  }
 }
 
 function inRankRows_(range) {
