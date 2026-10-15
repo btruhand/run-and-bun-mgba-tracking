@@ -146,7 +146,7 @@ clock, in hex, when the script was first loaded in this mGBA, and `n` counts up;
 {"type":"sync","playTime":43424,"mons":[{"pid":"...","species":"Piplup","nick":"","hp":0,"where":"party|box"}],"defeated":["<trainerId>",...],"badges":2,"complete":true}   // not sent yet
 ```
 
-Species names come from the ROM's species table and must match what the `Sprites` tab / IMG column expects.
+Species names come from the ROM's species table and are sent as the sheet spells them, since the Species dropdown only accepts the names in `Sprites!D` (and the sprite lookup uses them too). `G.species_name` in `gen3.lua` restores the names the ROM shortens to 10 characters (Centskorch → Centiskorch, and nine more), uses the sheet's Nidoran-F, Nidoran-M and Flabebe, and names the Oricorio, Lycanroc and Urshifu forms by species id, because the ROM names each form the same. Nine species have no `Sprites` row (Venonat, Ditto, Cleffa, Magearna, Marshadow, Poipole, Naganadel, Blacephalon, Zeraora); a catch or evolve of those fails until the sheet lists them.
 
 ## Savestates & old saves
 

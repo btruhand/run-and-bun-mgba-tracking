@@ -561,6 +561,45 @@ test("observed: an evolution is sent once, with the default nickname the game ga
   eq(#w.events, 1, "sent once")
 end)
 
+test("species names are sent as the sheet spells them", function()
+  local m = Fake.new()
+  local names = { [851] = "Centskorch", [823] = "Corvknight", [740] = "Crabminabl", [669] = "Flabébé", [29] = "Nidoran♀",
+    [32] = "Nidoran♂", [772] = "Type: Null", [850] = "Sizzlipede", [741] = "Oricorio", [1170] = "Oricorio",
+    [745] = "Lycanroc", [1174] = "Lycanroc", [892] = "Urshifu", [1230] = "Urshifu", [666] = "Vivillon", [1114] = "Vivillon" }
+  for id, name in pairs(names) do m:species_name(id, name) end
+  for id, want in pairs({
+    [851] = "Centiskorch", [823] = "Corviknight", [740] = "Crabominable", -- shortened by the ROM
+    [669] = "Flabebe", [29] = "Nidoran-F", [32] = "Nidoran-M",           -- é, ♀, ♂ decoded, then the sheet's spelling
+    [772] = "Type: Null",                                                -- : decoded
+    [741] = "Oricorio-Baile", [1170] = "Oricorio-Pau", [745] = "Lycanroc Midday", [1174] = "Lycanroc Dusk",
+    [892] = "Urshifu Single", [1230] = "Urshifu Rapid",                  -- forms the sheet tells apart
+    [850] = "Sizzlipede", [666] = "Vivillon", [1114] = "Vivillon",        -- as the ROM has them
+  }) do
+    eq(G.species_name(m, id), want, names[id] .. " (#" .. id .. ")")
+  end
+end)
+
+test("nicknames and map names decode é, ♀, ♂ and : as themselves", function()
+  local m = Fake.new()
+  m:write_string(0x02001000, "Nidoran♀", 10)
+  eq(G.decode_string(m, 0x02001000, 10), "Nidoran♀", "nickname")
+  m:map_name(135, "POKéMON MANSION")
+  eq(G.map_name(m, 135), "POKéMON MANSION", "map name")
+end)
+
+test("observed: Sizzlipede evolves into the ROM's Centskorch and is sent as Centiskorch, keeping the game's nickname", function()
+  local w = mworld({ party = { TEAM[2] } })
+  w.mem:species_name(851, "Centskorch")
+  w.scans(1)
+  w.mem:party_mon(0, with(TEAM[2], { species = 851, nick = "Centskorch" }))
+  w.scans(2)
+  eq(types(w.events), "evolve", "events")
+  local e = w.events[1]
+  eq(e.from, "Sizzlipede", "from")
+  eq(e.to, "Centiskorch", "to")
+  eq(e.nick, "Centskorch", "nick (what the game stored)")
+end)
+
 test("a nicknamed mon evolves without a nick in the event", function()
   local w = mworld({ party = { with(SCATTERBUG, { nick = "Dusty" }) } })
   w.scans(1)

@@ -15,7 +15,10 @@ local PERM = {
 }
 G.PERM = PERM
 
-local PUNCT = { [0x00] = " ", [0xAB] = "!", [0xAC] = "?", [0xAD] = ".", [0xAE] = "-", [0xB4] = "'", [0xB8] = ",", [0xBA] = "/" }
+local PUNCT = {
+  [0x00] = " ", [0xAB] = "!", [0xAC] = "?", [0xAD] = ".", [0xAE] = "-", [0xB4] = "'", [0xB8] = ",", [0xBA] = "/",
+  [0x1B] = "é", [0xB5] = "♂", [0xB6] = "♀", [0xF0] = ":", -- Flabébé, Pokémon; Nidoran♂/♀; Type: Null
+}
 
 function G.decode_string(mem, addr, n)
   local out = {}
@@ -85,7 +88,29 @@ function G.battle_mon(mem, b)
   }
 end
 
-function G.species_name(mem, id) return G.decode_string(mem, A.species_names + id * 11, 11) end
+-- Species names are sent as the sheet spells them: its Species dropdown only takes the names in the Sprites tab
+-- (column D), and the sprite lookup uses them too.
+-- The ROM keeps 10 characters, so it shortens longer names:
+local FULL_NAMES = {
+  Barraskewd = "Barraskewda", Basclegion = "Basculegion", Blacphalon = "Blacephalon", Centskorch = "Centiskorch",
+  Corvknight = "Corviknight", Corvsquire = "Corvisquire", Crabminabl = "Crabominable", Flechinder = "Fletchinder",
+  Polteageis = "Polteageist", Stonjourne = "Stonjourner",
+}
+-- The sheet's own spellings:
+local SHEET_NAMES = { ["Flabébé"] = "Flabebe", ["Nidoran♀"] = "Nidoran-F", ["Nidoran♂"] = "Nidoran-M" }
+-- Forms the ROM names alike but the sheet tells apart, by species id (read from each id's types and base stats):
+local FORM_NAMES = {
+  [741] = "Oricorio-Baile", [1169] = "Oricorio-Pom", [1170] = "Oricorio-Pau", [1171] = "Oricorio-Sensu",
+  [745] = "Lycanroc Midday", [1173] = "Lycanroc Midnight", [1174] = "Lycanroc Dusk",
+  [892] = "Urshifu Single", [1230] = "Urshifu Rapid",
+}
+
+function G.species_name(mem, id)
+  if FORM_NAMES[id] then return FORM_NAMES[id] end
+  local name = G.decode_string(mem, A.species_names + id * 11, 11)
+  name = FULL_NAMES[name] or name
+  return SHEET_NAMES[name] or name
+end
 
 -- RAM trainer id -> name.
 function G.trainer_name(mem, id)

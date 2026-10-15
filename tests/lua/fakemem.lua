@@ -45,18 +45,20 @@ function F:write16(a, v) self:write8(a, v) self:write8(a + 1, v >> 8) end
 function F:write32(a, v) self:write16(a, v) self:write16(a + 2, v >> 16) end
 
 -- Gen 3 string, padded with 0xFF up to `size` bytes.
+-- Characters other than letters and digits, by Unicode code point.
+local GLYPH = { [32] = 0x00, [39] = 0xB4, [58] = 0xF0, [0xE9] = 0x1B, [0x2640] = 0xB6, [0x2642] = 0xB5 } -- ' : é ♀ ♂
+
 function F:write_string(a, s, size)
   for i = 0, size - 1 do self:write8(a + i, 0xFF) end
-  for i = 1, #s do
-    local c = s:byte(i)
+  local i = 0
+  for _, c in utf8.codes(s) do
     local g
     if c >= 65 and c <= 90 then g = 0xBB + c - 65
     elseif c >= 97 and c <= 122 then g = 0xD5 + c - 97
     elseif c >= 48 and c <= 57 then g = 0xA1 + c - 48
-    elseif c == 32 then g = 0x00
-    elseif c == 39 then g = 0xB4
-    else error("cannot encode " .. s) end
-    self:write8(a + i - 1, g)
+    else g = GLYPH[c] or error("cannot encode " .. s) end
+    self:write8(a + i, g)
+    i = i + 1
   end
 end
 
