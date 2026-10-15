@@ -4,6 +4,53 @@ Tooling to keep a Google Sheets kill tracker (the `Rankings` tab of the "R&B kil
 
 The long-term goal is for mGBA to feed the sheet directly; see [DESIGN.md](DESIGN.md) for the full design and [PROGRESS.md](PROGRESS.md) for what is done and what is left. **What exists today:** a refactored Apps Script project with a web app endpoint that accepts game events, and an mGBA Lua script that tracks battles (kills, deaths, splits), catches and evolutions. The Lua script sends events over a local socket to a small relay, which forwards them to the sheet.
 
+## How to use
+
+You need mGBA 0.10.3 (higher versions probably work but was not tested), the Run & Bun 1.0.7 ROM, Node (the version in `.nvmrc`) and a clone of this repo.
+
+### One-time setup
+
+1. **Copy the sheet.** Open the [R&B kill sheet template](https://docs.google.com/spreadsheets/d/1I1SvHrP7H5h6KThq09LtJBzA1QQyLwFuUkNxWpvRkyE/edit?usp=sharing) and choose File → Make a copy. The copy comes with its own Apps Script project that already has the scripts in it, so there is nothing to upload.
+2. **Generate the token.** In the repo, run:
+
+   ```sh
+   npm run gen-token
+   ```
+
+   It writes a random `TOKEN` to `.env` and prints it. The relay sends this token with every request, and the web app refuses requests without it.
+
+3. **Give the script the token.** In your copy of the sheet, open Extensions → Apps Script, then Project Settings (the gear icon) → Script Properties → Add script property. Set the property name to `TOKEN` and the value to the printed token, then click Save script properties.
+4. **Deploy the web app.** Still in Apps Script, click Deploy → New deployment, click the gear next to "Select type" and choose Web app. Set:
+   - Execute as: **Me** (the web app writes to the sheet as you)
+   - Who has access: **Anyone** (the relay has no Google login; the token is what protects it)
+
+   Click Deploy. Google then asks you to authorize the script:
+   1. Click Authorize access and choose your Google account.
+   2. You'll see "Google hasn't verified this app", because it's your own copy of the script and not a published app. Click Advanced → Go to _(project name)_ (unsafe).
+   3. Allow access. The script asks only for the spreadsheet it is attached to (it declares `@OnlyCurrentDoc`).
+
+   Copy the Web app URL (it ends in `/exec`) and add it to `.env`:
+
+   ```
+   WEB_APP_URL=https://script.google.com/macros/s/.../exec
+   ```
+
+   Open that URL in a browser. `{"ok":false,"error":"unauthorized"}` means the web app is running and only needs the token.
+
+### Each time you play
+
+1. Start the relay in a terminal and leave it running:
+
+   ```sh
+   npm run relay
+   ```
+
+   It checks the URL and token when it starts.
+
+2. With the ROM running in mGBA, load `lua/tracker.lua` (Tools → Scripting → File → Load script). The scripting console shows `relay: connected on port 38765`, and catches, kills, deaths, evolutions and badges now show up on the `Rankings` tab.
+
+The sheet tracks one run (save file) at a time; it locks onto the first one that sends it an event. To start a new run, press Reset Run (`AA9`). See [Relay](#relay) and [Lua tracker](#lua-tracker) for details.
+
 ## What's here
 
 ```
