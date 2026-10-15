@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Interactively creates the two clasp project files, which are gitignored because they hold script IDs:
 //   .clasp.json      prod script, rootDir "appsscript"  (used by plain `clasp` commands)
-//   .clasp.dev.json  dev script                         (used only by scripts/deploy-dev.sh)
+//   .clasp.dev.json  dev script                         (used by `npm run deploy:dev`)
 // Pass --dir <path> to write somewhere other than the repo root.
 const fs = require('fs');
 const path = require('path');

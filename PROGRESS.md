@@ -91,7 +91,7 @@ Done and tested on the **dev copy** only.
 
 - [x] `npm run test:sheet`: 18 scenarios against the dev web app (~2 min)
 - [x] `npm run test:lua`: 50 scenarios on a fake memory, no emulator (mutation-checked, including the catch and evolution rules)
-- [x] `setup-clasp`, `gen-token`, `deploy:dev`
+- [x] `setup-clasp`, `gen-token`, `deploy`, `deploy:dev`
 - [x] Read-only probes `lua/spike/probe.lua`, `probe2.lua`
 - [x] Remote control `lua/dev/remote.lua` + `tools/remote.py`: buttons, screenshots, savestates and watchers from a script (live)
 - [x] Tests for catches and evolutions

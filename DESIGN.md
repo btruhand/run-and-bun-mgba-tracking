@@ -256,7 +256,7 @@ lua/spike/      read-only probes used to find addresses
 tools/          remote.py, state.py (offline savestate reads)
 tests/lua/      tracker tests on fake memory
 tests/sheet/    scenario tests against the dev web app
-scripts/        setup-clasp, gen-token, deploy-dev
+scripts/        setup-clasp, gen-token, deploy, deploy-dev
 docs/           MEMORY_MAP.md, lua_progress/
 relay/          relay.mjs
 ```

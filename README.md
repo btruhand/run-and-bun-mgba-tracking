@@ -28,7 +28,8 @@ docs/
 scripts/
   gen-token.js   generates the shared secret
   setup-clasp.js asks for the prod and dev script IDs and writes the two clasp files
-  deploy-dev.sh  pushes to the DEV sheet and (re)deploys the web app
+  deploy.sh      pushes to a sheet's script, (re)deploys the web app and writes its URL to an env file
+  deploy-dev.sh  deploy.sh for the DEV sheet (.clasp.dev.json, .env.dev)
 relay/
   relay.mjs      forwards the tracker's events to the web app
 tools/
@@ -118,12 +119,14 @@ Limitation: kill credit for one enemy Pokémon can belong to only one of your mo
 Requires Node (see `.nvmrc`) and `clasp` (installed by `npm install`).
 
 1. `npm install`, then `npx clasp login`.
-2. **Work on a copy of the sheet.** Make a copy of the spreadsheet (File → Make a copy); it comes with its own bound script. Then run `npm run setup-clasp`. It asks for the prod script ID and the dev (copy) script ID (Apps Script → Project Settings → IDs) and writes `.clasp.json` (prod, `rootDir` set to `appsscript`) and `.clasp.dev.json` (dev). Both files are gitignored because they contain script IDs. Re-running offers your current IDs as defaults. Plain `clasp` commands use the prod file; `deploy-dev.sh` is the only thing that uses the dev file, and it never touches prod.
+2. **Work on a copy of the sheet.** Make a copy of the spreadsheet (File → Make a copy); it comes with its own bound script. Then run `npm run setup-clasp`. It asks for the prod script ID and the dev (copy) script ID (Apps Script → Project Settings → IDs) and writes `.clasp.json` (prod, `rootDir` set to `appsscript`) and `.clasp.dev.json` (dev). Both files are gitignored because they contain script IDs. Re-running offers your current IDs as defaults. Plain `clasp` commands and `npm run deploy` use the prod file; `npm run deploy:dev` uses the dev file and never touches prod.
 3. `npm run gen-token -- --env .env.dev` creates a random `TOKEN` in `.env.dev` and prints it (without `--env` it writes `.env`). In the dev copy's Apps Script → Project Settings → Script Properties set:
    - `TOKEN` — the printed value
    - `ENV` — `dev` (enables the test-only `dump` and `reset` actions; they refuse to run otherwise, so tests can't touch a real sheet)
 4. `npm run deploy:dev` stages the files, pushes them to the dev script, deploys, and writes `DEPLOYMENT_ID` and `WEB_APP_URL` to `.env.dev`. Re-running redeploys to the same URL.
 5. Open `WEB_APP_URL` once in a browser and approve the permission prompt. You should then see `{"ok":false,"error":"unauthorized"}`, which means it's working and just needs the token.
+
+`npm run deploy` does the same for the prod script in `.clasp.json`, reading and writing `.env`; it is `scripts/deploy.sh`, and `deploy:dev` is `scripts/deploy.sh --clasp .clasp.dev.json --env .env.dev`. Pass `--clasp` and `--env` to deploy any other copy (`npm run deploy -- --help`). Either way, a new deployment needs the browser approval in step 5 once. The clasp commands need "Google Apps Script API" turned on in your [Apps Script settings](https://script.google.com/home/usersettings).
 
 `.env`, `.env.*`, `.clasp.json`, `.clasp.dev.json` and `fixtures/private/` are gitignored.
 
