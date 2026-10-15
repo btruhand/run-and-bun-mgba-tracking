@@ -1,7 +1,8 @@
 // Forward the Lua tracker's events to the Apps Script web app. Node (see .nvmrc), no packages.
 //
 //   npm run relay                               # WEB_APP_URL and TOKEN from .env
-//   node relay/relay.mjs --env .env.prod        # another sheet
+//   node relay/relay.mjs --env .env.dev         # another sheet
+//   node relay/relay.mjs --help
 //
 // lua/tracker.lua connects to 127.0.0.1:38765 and sends each event as a line of JSON. The relay posts them to the web
 // app: every 200 ms, whatever has arrived goes out as one request, which is retried 3 times (after about 1, 2 and
@@ -171,10 +172,39 @@ export function createServer(relay) {
   });
 }
 
+const USAGE = `Forward the Lua tracker's events to the Apps Script web app.
+
+Usage: node relay/relay.mjs [--env FILE] [--port N]
+       npm run relay -- [--env FILE] [--port N]
+
+Options:
+  --env FILE   file with WEB_APP_URL and TOKEN (default: .env in the repo root);
+               WEB_APP_URL and TOKEN in the environment override it
+  --port N     port to listen on for the tracker (default: ${PORT}; must match TRACKER_RELAY_PORT)
+  -h, --help   show this help
+
+Examples:
+  npm run relay                          # the sheet in .env
+  node relay/relay.mjs --env .env.dev    # the sheet in .env.dev
+`;
+
 async function main() {
-  const { values: args } = parseArgs({
-    options: { env: { type: 'string', default: ROOT + '.env' }, port: { type: 'string', default: String(PORT) } },
-  });
+  let args;
+  try {
+    ({ values: args } = parseArgs({
+      options: {
+        env: { type: 'string', default: ROOT + '.env' },
+        port: { type: 'string', default: String(PORT) },
+        help: { type: 'boolean', short: 'h' },
+      },
+    }));
+  } catch (e) {
+    fail(`${e.message}\n\n${USAGE}`);
+  }
+  if (args.help) {
+    process.stdout.write(USAGE);
+    return;
+  }
   const env = readEnv(args.env);
   const url = process.env.WEB_APP_URL || env.WEB_APP_URL;
   const token = process.env.TOKEN || env.TOKEN;

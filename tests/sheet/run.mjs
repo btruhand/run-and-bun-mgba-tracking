@@ -1,10 +1,10 @@
-// Scenario tests against the DEV web app (needs WEB_APP_URL + TOKEN in .env, ENV=dev on the script).
+// Scenario tests against the DEV web app (needs WEB_APP_URL + TOKEN in .env.dev, ENV=dev on the script).
 // Usage: npm run test:sheet [-- --dump]   (--dump prints the final state of each scenario)
 import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 
 const env = Object.fromEntries(
-  readFileSync(new URL('../../.env', import.meta.url), 'utf8')
+  readFileSync(new URL('../../.env.dev', import.meta.url), 'utf8')
     .split('\n').filter((l) => l.includes('=')).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]),
 );
 const URL_ = env.WEB_APP_URL, TOKEN = env.TOKEN;

@@ -270,7 +270,7 @@ relay/          relay.mjs
 5. **Relay tests, no network** (`npm run test:relay`): a fake web app (including the Apps Script redirect) that can be down, refuse the token or fail; one request per tick, the 3 retries and their 1, 2, 4 s waits, dropping a request, a request being retried not holding up the next, and the TCP server (lines split across reads, a line cut off by a disconnect, reconnects, never writing back). The Lua side (`relay_client.lua`) is tested against a fake of mGBA's socket API in `npm run test:lua`.
 6. **Not built:** an automated end-to-end test (Lua → relay → dev web app → sheet; it was run by hand once) and an automated emulator-in-the-loop test.
 
-Secrets/config (`.env`, gitignored): dev web-app URL, shared token, deployment id. The token also lives in Script Properties.
+Secrets/config (gitignored): `.env.dev` has the dev web-app URL, shared token and deployment id; `.env` (the relay's default) the real sheet's URL and token. The token also lives in Script Properties.
 
 ## Decisions made
 
