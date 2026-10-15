@@ -190,7 +190,7 @@ So only kills (and deaths of boxed mons) depend on remembered history. Everythin
 
 ## Relay (`relay/relay.mjs`)
 
-Node (`.nvmrc`), no packages, one process, run from a terminal next to mGBA. It keeps nothing on disk.
+Node 22+ (`.nvmrc` pins the version), no packages, one process, run from a terminal next to mGBA. It keeps nothing on disk.
 
 1. **Connection.** The relay listens on `127.0.0.1:38765`. The tracker (`lua/relay_client.lua`) tries to connect when
    it loads and every two seconds while disconnected; on localhost a refused connect returns at once, so the game

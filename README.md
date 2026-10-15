@@ -6,7 +6,7 @@ The long-term goal is for mGBA to feed the sheet directly; see [DESIGN.md](DESIG
 
 ## How to use
 
-You need mGBA 0.10.3 (higher versions probably work but was not tested), the Run & Bun 1.0.7 ROM, Node (the version in `.nvmrc`) and a clone of this repo.
+You need mGBA 0.10.3 (higher versions probably work but was not tested), the Run & Bun 1.0.7 ROM, Node 22 or newer and a clone of this repo.
 
 ### One-time setup
 
@@ -164,7 +164,7 @@ Limitation: kill credit for one enemy Pokémon can belong to only one of your mo
 
 ## Development setup
 
-Requires Node (see `.nvmrc`) and `clasp` (installed by `npm install`).
+Requires Node 22 or newer (`engines` in `package.json`; `npm install` refuses older versions because `.npmrc` sets `engine-strict`) and `clasp` (installed by `npm install`). `.nvmrc` pins the exact version, and `.envrc` selects it if you use direnv.
 
 1. `npm install`, then `npx clasp login`.
 2. **Work on a copy of the sheet.** Make a copy of the spreadsheet (File → Make a copy); it comes with its own bound script. Then run `npm run setup-clasp`. It asks for the prod script ID and the dev (copy) script ID (Apps Script → Project Settings → IDs) and writes `.clasp.json` (prod, `rootDir` set to `appsscript`) and `.clasp.dev.json` (dev). Both files are gitignored because they contain script IDs. Re-running offers your current IDs as defaults. Plain `clasp` commands and `npm run deploy` use the prod file; `npm run deploy:dev` uses the dev file and never touches prod.
@@ -210,7 +210,7 @@ Not detected yet: trades (a new party mon with another OT id is only logged), an
 
 ## Relay
 
-`relay/relay.mjs` (Node, the version in `.nvmrc`; no packages) forwards the tracker's events to the web app in `WEB_APP_URL` with `TOKEN`, both from `.env`. Run it in a terminal while you play:
+`relay/relay.mjs` (Node 22+, no packages) forwards the tracker's events to the web app in `WEB_APP_URL` with `TOKEN`, both from `.env`. Run it in a terminal while you play:
 
 ```sh
 npm run relay                                 # or: node relay/relay.mjs

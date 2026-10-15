@@ -3,6 +3,9 @@
   "version": "0.0.1",
   "description": "Automatic Pokemon tracker for a Run&Bun HC Nuzlocke run on mGBA",
   "main": "index.js",
+  "engines": {
+    "node": ">=22"
+  },
   "devDependencies": {
     "@google/clasp": "^3.4.1"
   },
@@ -13,7 +16,7 @@
     "deploy:dev": "scripts/deploy-dev.sh",
     "test:sheet": "node tests/sheet/run.mjs",
     "test:lua": "lua tests/lua/run.lua",
-    "test:relay": "node --test tests/relay/",
+    "test:relay": "node --test \"tests/relay/*.test.mjs\"",
     "relay": "node relay/relay.mjs",
     "setup-clasp": "node scripts/setup-clasp.js"
   },

@@ -11,6 +11,7 @@ The dev sheet is a copy of the real one with its own script (`.clasp.dev.json`) 
 
 - **Never test against the live sheet** (`.env`, `.clasp.json`): events sent there are applied to the user's run. The only harmless request to it is `{"events": []}` (what the relay sends on start); ask before sending even that. Deploying to it (`npm run deploy`) is the user's call.
 - **One user of the dev sheet at a time.** `sim.mjs`, `npm run test:sheet` and a relay started with `--env .env.dev` all write to it, and the first two reset it. Don't run two at once (a background suite included).
+- Run `node` and `npm` through direnv, e.g. `direnv exec . npm run test:sheet`: the repo needs Node 22+ (`.nvmrc`), and a shell that doesn't load direnv gets nvm's default instead. Check `direnv exec . node -v` once.
 - Changes to `appsscript/` reach the dev web app only after `npm run deploy:dev` (pushes and redeploys the same URL, about 15 s).
 
 ## The loop

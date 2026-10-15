@@ -1,4 +1,4 @@
-// Forward the Lua tracker's events to the Apps Script web app. Node (see .nvmrc), no packages.
+// Forward the Lua tracker's events to the Apps Script web app. Node 22+ (.nvmrc pins the version), no packages.
 //
 //   npm run relay                               # WEB_APP_URL and TOKEN from .env
 //   node relay/relay.mjs --env .env.dev         # another sheet
