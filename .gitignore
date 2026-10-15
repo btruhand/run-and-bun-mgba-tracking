@@ -10,5 +10,6 @@ fixtures/private/
 .clasp.json
 .clasp.dev.json
 .remote/
+.direnv
 
 .DS_Store
