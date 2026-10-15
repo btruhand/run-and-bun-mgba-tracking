@@ -99,15 +99,15 @@ fixtures/private/   your ROM / savestates (gitignored)
 
 `Rankings` rows 3–102 hold up to 100 Pokémon.
 
-| Column | Meaning |
-|--------|---------|
-| `E` | formula (Gemstones lookup on Total KC), never written by scripts |
-| `F` | Status (`Alive` / `Dead`) |
-| `H` / `I` / `J` | Nickname / Species / Encounter Location |
-| `K:S` | KC for Split 1–8 and E4 Split |
-| `T` | Total KC |
-| `W` | Add KO checkbox |
-| `Y` | hidden mon ID (`personality:otid`), written only by the web app |
+| Column          | Meaning                                                          |
+| --------------- | ---------------------------------------------------------------- |
+| `E`             | formula (Gemstones lookup on Total KC), never written by scripts |
+| `F`             | Status (`Alive` / `Dead`)                                        |
+| `H` / `I` / `J` | Nickname / Species / Encounter Location                          |
+| `K:S`           | KC for Split 1–8 and E4 Split                                    |
+| `T`             | Total KC                                                         |
+| `W`             | Add KO checkbox                                                  |
+| `Y`             | hidden mon ID (`personality:otid`), written only by the web app  |
 
 Right-hand panel (column `AA`): `AA2` Attempt, `AA4` Badges, `AA7` Advance Split, `AA9` Reset Run, `AA11` Undo latest tracking change. **Badges is the current split**: a kill goes in column `K + Badges`.
 
@@ -133,15 +133,15 @@ Every request is JSON containing `token`. `POST` bodies are sent as `text/plain`
 
 Every event has `id` (unique; repeats are ignored), `run` (identifies the save/run), `playTime` (in-game play time in seconds) and `type`:
 
-| type | fields | effect |
-|------|--------|--------|
-| `catch` | `pid`, `species`, `nick`, `location` | add a row (status Alive, KC 0) in the first empty row |
-| `kill` | `pid`, `split` (1–9), `trainer`, `key` | +1 in that split's column |
-| `death` | `pid` | Status → `Dead` |
-| `evolve` | `pid`, `from`, `to`, `nick` (optional) | change species in place (and the nickname, if sent), KC kept |
-| `trade` | `old_pid`, `pid`, `species`, `nick`, `location` | replace the row's mon in place, KC kept |
-| `split` | `badges` (0–8) | set Badges directly |
-| `sync` | `mons[]`, `defeated[]`, `badges`, `complete` | reconcile after a savestate / save load |
+| type     | fields                                          | effect                                                       |
+| -------- | ----------------------------------------------- | ------------------------------------------------------------ |
+| `catch`  | `pid`, `species`, `nick`, `location`            | add a row (status Alive, KC 0) in the first empty row        |
+| `kill`   | `pid`, `split` (1–9), `trainer`, `key`          | +1 in that split's column                                    |
+| `death`  | `pid`                                           | Status → `Dead`                                              |
+| `evolve` | `pid`, `from`, `to`, `nick` (optional)          | change species in place (and the nickname, if sent), KC kept |
+| `trade`  | `old_pid`, `pid`, `species`, `nick`, `location` | replace the row's mon in place, KC kept                      |
+| `split`  | `badges` (0–8)                                  | set Badges directly                                          |
+| `sync`   | `mons[]`, `defeated[]`, `badges`, `complete`    | reconcile after a savestate / save load                      |
 
 `pid` is the personality value plus original-trainer ID (`"0xA1B2C3D4:0x1234ABCD"`), which stays the same through evolution and nickname changes. Rows move on every sort, so the sheet always finds a Pokémon by this ID.
 
@@ -191,12 +191,12 @@ These run against the **dev** web app (`WEB_APP_URL` and `TOKEN` from `.env.dev`
 
 Load `lua/tracker.lua` in mGBA 0.10.3 (Tools → Scripting → File → Load script) with Run & Bun 1.0.7 running. It checks the ROM's name tables first and refuses to start on anything else. Each event appears in the scripting console as `EVENT {json}` and is sent to the [relay](#relay) if it is running (otherwise the line ends with `(not sent: relay not connected)`):
 
-| type | when |
-|------|------|
-| `kill` | an enemy mon in a **trainer** battle faints; credited to your mon on the field. `split` is leaders defeated + 1, `trainer` is the opponent's id, `key` is `<trainer>:<enemy party slot>` |
-| `death` | one of your mons fainted in a battle (sent when the battle ends) |
-| `split` | a gym leader was beaten; `badges` is how many of the eight leaders are defeated |
-| `catch` | a mon joined you: a battle ended with the mon caught (it is read from the party or box it was stored in, so the nickname is final), or a new mon with your OT id appeared in the party outside battle (the starter). `species`, `nick`, `location` (met location name) |
+| type     | when                                                                                                                                                                                                                                                                                                                                                    |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kill`   | an enemy mon in a **trainer** battle faints; credited to your mon on the field. `split` is leaders defeated + 1, `trainer` is the opponent's id, `key` is `<trainer>:<enemy party slot>`                                                                                                                                                                |
+| `death`  | one of your mons fainted in a battle (sent when the battle ends)                                                                                                                                                                                                                                                                                        |
+| `split`  | a gym leader was beaten; `badges` is how many of the eight leaders are defeated                                                                                                                                                                                                                                                                         |
+| `catch`  | a mon joined you: a battle ended with the mon caught (it is read from the party or box it was stored in, so the nickname is final), or a new mon with your OT id appeared in the party outside battle (the starter). `species`, `nick`, `location` (met location name)                                                                                  |
 | `evolve` | a known party mon's species changed, read the same with a valid checksum on two party scans (about a second apart). `from`, `to` are species names; `nick` is sent only when the game renamed the mon, which it does when the mon still had its species name (Scatterbug → Spewpa). A change that keeps the species name (a form change) is only logged |
 
 Events carry `run` (your trainer id), `playTime` and an `id`, `<run>:<session>.<n>`, unique across script reloads and mGBA restarts; the web app skips ids it has already applied. Kills in doubles use the leftmost live mon and set `ambiguous` when both of yours were alive (the attacker isn't read yet). A jump in play time (loading a savestate or a save) drops the current battle without emitting anything.
