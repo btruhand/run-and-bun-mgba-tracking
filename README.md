@@ -51,6 +51,36 @@ You need mGBA 0.10.3 (higher versions probably work but was not tested), the Run
 
 The sheet tracks one run (save file) at a time; it locks onto the first one that sends it an event. To start a new run, press Reset Run (`AA9`). See [Relay](#relay) and [Lua tracker](#lua-tracker) for details.
 
+## Redeploying
+
+If you'd like to update the Apps Script (for example, because there was an update), you can redeploy in the following two ways:
+
+### With `npm run deploy`
+
+You will need the `clasp` setup from [Development setup](#development-setup)):
+
+```sh
+npm run deploy
+```
+
+It pushes the files to your script and updates the deployment whose ID is `DEPLOYMENT_ID` in `.env` to a new version, so the WebApp URL stays the same. If you created the deployment by hand in the one-time setup, `.env` has no `DEPLOYMENT_ID` yet, and the script would create a new deployment instead. Add it first: it is the part of your web app URL between `/s/` and `/exec`.
+
+```
+DEPLOYMENT_ID=AKfycb...
+```
+
+### Through the Apps Script editor
+
+1. Replace the project's files with the ones in `appsscript/` (paste them in, or run `npx clasp push`).
+2. Click Deploy → Manage deployments.
+3. Click the pencil (Edit) icon on your web app deployment.
+4. Under Version, choose **New version**, then click Deploy.
+
+Don't use Deploy → New deployment for this, and don't pick an older version number in step 4: the web app keeps serving whichever version the deployment points to.
+
+> [!NOTE]
+> Whichever option you choose, **always redeploy as a new version of the existing deployment; do not create a new deployment.** A new deployment gets a new web app URL, and you would have to update `WEB_APP_URL` in `.env` and approve the permission prompt again.
+
 ## What's here
 
 ```
