@@ -84,6 +84,7 @@ tools/
   state.py       reads RAM out of a savestate offline
 .claude/
   skills/remote-controlling-mgba/   how a Claude Code session drives the game with the remote
+  skills/testing-on-dev-sheet/      simulating events against the dev sheet (sim.mjs runs a list of steps)
   agents/mgba-driver.md             subagent for long play-and-trace sequences
 tests/sheet/
   run.mjs        scenario tests against the dev web app
@@ -186,6 +187,8 @@ npm run test:sheet -- --dump          # also print sheet state after each scenar
 ```
 
 These run against the **dev** web app (`WEB_APP_URL` and `TOKEN` from `.env.dev`) and take around two minutes (each request takes a few seconds). Each scenario resets the dev sheet first and again at the end. They cover catches, kills and sorting, deaths, evolutions, trades, splits, rewinds and forward jumps via `sync`, killer re-attribution, run mismatches, duplicate events, errors in an event or a sync step going to `_Issues` without stopping the rest, every event's `_Events` row with its status and issue reference, and that row formulas (including the `U:W` bar graph) still reference their own row after a sort.
+
+To try a sequence of events by hand, `node .claude/skills/testing-on-dev-sheet/sim.mjs steps.json` resets the dev sheet, plays the steps and prints `Rankings`, `_Events` and `_Issues` (see `.claude/skills/testing-on-dev-sheet/SKILL.md`).
 
 ## Lua tracker
 
