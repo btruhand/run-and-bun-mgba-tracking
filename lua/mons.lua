@@ -56,23 +56,7 @@ function M:reset()
   self.last_party = nil
 end
 
--- Calls fn(addr, box) for every occupied party slot and PC box slot (by the unencrypted personality / OT id,
--- so a slot that is mid-rewrite still counts).
-function M:each_slot(fn)
-  local mem = self.mem
-  for i = 0, 5 do
-    local a = A.party + i * A.mon_size
-    if mem:read32(a) ~= 0 or mem:read32(a + 4) ~= 0 then fn(a, false) end
-  end
-  local storage = G.storage(mem)
-  if not storage then return end
-  local base = storage + A.box_mons
-  local raw = mem:readRange(base, A.box_slots * A.box_mon_size)
-  for s = 0, A.box_slots - 1 do
-    local pid, ot = string.unpack("<I4I4", raw, s * A.box_mon_size + 1)
-    if pid ~= 0 or ot ~= 0 then fn(base + s * A.box_mon_size, true) end
-  end
-end
+function M:each_slot(fn) G.each_slot(self.mem, fn) end
 
 function M:seed()
   self.known = {}

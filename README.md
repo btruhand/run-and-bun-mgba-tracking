@@ -236,7 +236,9 @@ Species names are sent as the sheet's `Sprites` tab spells them (full names wher
 
 Mons already in the party and boxes when the script starts, or after loading a savestate or save, are treated as known and not sent: the sheet may already have them (hand-entered rows have no id), and `sync` will reconcile them. A mon is sent at most once per timeline, and the sheet ignores a catch for an id it already has. Catching a species you already have is sent as a new mon (and logged); evolution lines are not checked.
 
-Not detected yet: trades (a new party mon with another OT id is only logged), and the `sync` snapshot.
+**Sending a `sync`.** Type `syncToTracker()` in the scripting console (Tools → Scripting, the console's input line) after loading a savestate or an older save, or when the sheet has drifted from the game. It sends the snapshot (every mon in the party and boxes, the defeated trainers, the badge count) and the sheet reconciles its log against it (below); the console says what was sent, or why it wasn't. It sends nothing in a battle (a trainer's defeated flag is only set when the fight ends), before a save is loaded, or while a mon can't be read (the game is rewriting it): in each case try again. Eggs aren't in the snapshot. It is never sent automatically, not even after a play-time jump: you decide when the sheet is reconciled.
+
+Not detected yet: trades (a new party mon with another OT id is only logged).
 
 ## Relay
 
@@ -280,4 +282,4 @@ This is how catches, evolutions and PC moves were observed (the traces are in [d
 
 ## Not built yet
 
-See [DESIGN.md](DESIGN.md): detection of trades and the `sync` snapshot.
+See [DESIGN.md](DESIGN.md): detection of trades.

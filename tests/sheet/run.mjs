@@ -142,6 +142,41 @@ const scenarios = {
     assert.equal(byId(s, A).species, 'Empoleon');
     assert.equal(byId(s, C).species, 'Ralts');
   },
+  // The next three send a sync the way lua/sync.lua writes it: trainer ids as numbers (a kill carries its trainer as a
+  // string), no hp on a mon in a box, an empty list as [].
+  async 'a kill stays when its trainer is in the sync as a number, and goes when it is not'() {
+    await send(catchEv(10, A, 'Piplup'), killEv(20, A, 1, '615'));
+    await send(sync(30, [mon(A, 'Piplup')], { defeated: [615], badges: 0, complete: true }));
+    assert.equal(byId(await dump(), A).total, 1, 'kept');
+    await send(sync(30, [mon(A, 'Piplup')], { defeated: [], badges: 0, complete: true }));
+    assert.equal(byId(await dump(), A).total, 0, 'taken back');
+  },
+  async 'after a reload that lost two catches, sync drops their old ids and the recaptures come in'() {
+    const OLD_G = '0xB1:0xF9D040AF', OLD_F = '0xC1:0xF9D040AF', NEW_G = '0xB2:0xF9D040AF', NEW_F = '0xC2:0xF9D040AF';
+    await send(catchEv(10, A, 'Piplup'), catchEv(20, OLD_G, 'Gligar', 'Rusturf Tunnel'), catchEv(30, OLD_F, 'Foongus', 'Verdanturf Town'), killEv(40, OLD_G, 1, '615'));
+    // the game goes back to play time 15, where only Piplup existed
+    await send(sync(15, [mon(A, 'Piplup')], { defeated: [], badges: 0, complete: true }));
+    let s = await dump();
+    assert.deepEqual(s.rows.map((r) => r.id), [A], 'the lost catches are off the sheet');
+    // recaptured in the new timeline, with new ids
+    await send(catchEv(25, NEW_G, 'Gligar', 'Rusturf Tunnel'), catchEv(26, NEW_F, 'Foongus', 'Verdanturf Town'));
+    await send(sync(50, [mon(A, 'Piplup'), mon(NEW_G, 'Gligar'), mon(NEW_F, 'Foongus', { where: 'box', hp: undefined })], { defeated: [], badges: 0, complete: true }));
+    s = await dump();
+    assert.deepEqual(s.rows.map((r) => r.id).sort(), [A, NEW_G, NEW_F].sort());
+    assert.equal(s.rows.filter((r) => r.species === 'Gligar').length, 1, 'no duplicate Gligar');
+    assert.equal(s.rows.every((r) => r.total === 0), true, 'the lost kill did not come back');
+  },
+  async 'when the tracker missed the recaptures, sync adds them from the game'() {
+    await send(catchEv(10, A, 'Piplup'), catchEv(20, '0xB1:0xF9D040AF', 'Gligar', 'Rusturf Tunnel'));
+    await send(sync(50, [
+      mon(A, 'Piplup'),
+      mon('0xB2:0xF9D040AF', 'Gligar', { location: 'Rusturf Tunnel' }),
+      mon('0xC2:0xF9D040AF', 'Foongus', { location: 'Verdanturf Town', where: 'box', hp: undefined }),
+    ], { defeated: [], badges: 0, complete: true }));
+    const s = await dump();
+    assert.deepEqual(s.rows.map((r) => r.id).sort(), [A, '0xB2:0xF9D040AF', '0xC2:0xF9D040AF'].sort(), 'old Gligar gone, both new ones added');
+    assert.equal(byId(s, '0xC2:0xF9D040AF').location, 'Verdanturf Town');
+  },
   async 'events from a different run are held'() {
     await send(catchEv(10, A, 'Piplup'));
     const saved = RUN; RUN = 'other';

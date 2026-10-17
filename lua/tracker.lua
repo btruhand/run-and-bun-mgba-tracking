@@ -6,12 +6,13 @@ local dir = debug.getinfo(1, "S").source:match("^@(.*[/\\])") or TRACKER_DIR or 
 package.path = dir .. "?.lua;" .. package.path
 
 -- mGBA keeps `require`'s cache between script loads, so a reload would silently reuse old modules.
-for _, name in ipairs({ "addresses", "gen3", "json", "battle", "mons", "relay_client" }) do package.loaded[name] = nil end
+for _, name in ipairs({ "addresses", "gen3", "json", "battle", "mons", "sync", "relay_client" }) do package.loaded[name] = nil end
 
 local G = require("gen3")
 local J = require("json")
 local Battle = require("battle")
 local Mons = require("mons")
+local Sync = require("sync")
 local RelayClient = require("relay_client")
 
 local function log(msg) console:log(msg) end
@@ -38,12 +39,13 @@ TRACKER_SEQ = TRACKER_SEQ or 0
 
 local function emit(ev)
   ev.run = G.run_id(emu)
-  ev.playTime = play_time
+  if ev.playTime == nil then ev.playTime = play_time end
   TRACKER_SEQ = TRACKER_SEQ + 1
   ev.id = string.format("%s:%s.%d", tostring(ev.run), TRACKER_SESSION, TRACKER_SEQ)
   local line = J.encode(ev)
   local sent, why = relay:send(line)
   log("EVENT " .. line .. (sent and "" or "  (not sent: " .. why .. ")"))
+  return sent
 end
 
 local battle = Battle.new(emu, emit, function(msg) log("battle: " .. msg) end)
@@ -63,6 +65,23 @@ local function on_frame()
   mons:step()
 end
 
+-- Call from the scripting console (`syncToTracker()`) after loading a savestate or an older save, or whenever the sheet
+-- has drifted from the game: sends what the game has now (every mon, defeated trainers, badges) and the sheet
+-- reconciles its event log against it. Returns true if it was sent.
+function syncToTracker()
+  local snapshot, why = Sync.snapshot(emu)
+  if not snapshot then
+    log("sync: not sent (" .. why .. ")")
+    return false
+  end
+  snapshot.playTime = G.play_time(emu) -- now, not as of the last frame
+  local sent = emit(snapshot)
+  if sent then
+    log(string.format("sync: sent %d mons, %d defeated trainers, %d badges", #snapshot.mons, #snapshot.defeated, snapshot.badges))
+  end
+  return sent
+end
+
 if TRACKER_CB then callbacks:remove(TRACKER_CB) end
 TRACKER_CB = callbacks:add("frame", on_frame)
-log("tracker: running (Run & Bun 1.0.7 verified)")
+log("tracker: running (Run & Bun 1.0.7 verified); syncToTracker() sends a sync")

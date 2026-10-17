@@ -138,6 +138,18 @@ function G.trainer_flag(mem, id)
   return (mem:read8(sb1 + A.trainer_flags + (id >> 3)) >> (id & 7)) & 1 == 1
 end
 
+-- RAM trainer ids of every trainer whose defeated flag is set, in ascending order (nil before a save is loaded).
+function G.defeated_trainers(mem)
+  local sb1 = sb(mem, A.sb1_ptr)
+  if not sb1 then return nil end
+  local raw = mem:readRange(sb1 + A.trainer_flags, (A.trainer_count + 7) // 8)
+  local ids = {}
+  for id = 0, A.trainer_count - 1 do
+    if (raw:byte((id >> 3) + 1) >> (id & 7)) & 1 == 1 then ids[#ids + 1] = id end
+  end
+  return ids
+end
+
 -- How many of the eight gym leaders are defeated (0..8). The split is this + 1.
 function G.leaders_defeated(mem)
   local n = 0
@@ -167,6 +179,24 @@ end
 function G.run_id(mem)
   local id = G.trainer_id(mem)
   return id and string.format("0x%08X", id)
+end
+
+-- Calls fn(addr, box) for every occupied party slot and PC box slot (by the unencrypted personality / OT id, so a
+-- slot that is mid-rewrite still counts). Returns false if the PC storage isn't loaded (the party is still visited).
+function G.each_slot(mem, fn)
+  for i = 0, 5 do
+    local a = A.party + i * A.mon_size
+    if mem:read32(a) ~= 0 or mem:read32(a + 4) ~= 0 then fn(a, false) end
+  end
+  local storage = G.storage(mem)
+  if not storage then return false end
+  local base = storage + A.box_mons
+  local raw = mem:readRange(base, A.box_slots * A.box_mon_size)
+  for s = 0, A.box_slots - 1 do
+    local pid, ot = string.unpack("<I4I4", raw, s * A.box_mon_size + 1)
+    if pid ~= 0 or ot ~= 0 then fn(base + s * A.box_mon_size, true) end
+  end
+  return true
 end
 
 -- Address of the PC storage (gPokemonStorage), or nil before a save is loaded.

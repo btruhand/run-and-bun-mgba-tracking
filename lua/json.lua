@@ -1,4 +1,4 @@
--- Minimal JSON encoder (objects with sorted keys, arrays, strings, numbers, booleans). Encode only.
+-- Minimal JSON encoder (objects with sorted keys, arrays (an empty table is one), strings, numbers, booleans). Encode only.
 
 local J = {}
 
@@ -11,7 +11,7 @@ end
 local function is_array(t)
   local n = 0
   for _ in pairs(t) do n = n + 1 end
-  return n > 0 and n == #t
+  return n == #t -- an empty table is an empty array (a sync with no mons or no defeated trainers)
 end
 
 function J.encode(v)

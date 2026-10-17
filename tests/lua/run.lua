@@ -9,6 +9,7 @@ local G = require("gen3")
 local J = require("json")
 local Battle = require("battle")
 local Mons = require("mons")
+local Sync = require("sync")
 local Fake = require("fakemem")
 local RelayClient = require("relay_client")
 
@@ -854,6 +855,224 @@ test("a short write closes the connection, so the relay drops the partial line",
   eq(ok, false, "send")
   eq(why, "send failed: partial write", "why")
   eq(c.sock, nil, "closed")
+end)
+
+-- sync snapshot -----------------------------------------------------------------------------------------------------
+
+local function sworld()
+  local m = Fake.new()
+  for id, name in pairs({ [393] = "Piplup", [261] = "Poochyena", [850] = "Sizzlipede" }) do m:species_name(id, name) end
+  m:map_name(16, "Route 101")
+  m:map_name(17, "Route 102")
+  m:party_mon(0, { personality = 0x262E1B25, species = 393, nick = "Pengwin", level = 12, hp = 31, max_hp = 38, met_location = 16 })
+  m:party_mon(1, { personality = 0x0BA1EC41, species = 261, level = 5, hp = 0, max_hp = 20, met_location = 17 })
+  m:box_mon(1, 3, { personality = 0x128A564B, species = 850, nick = "Sizzle", met_location = 17 })
+  return m
+end
+
+test("a sync snapshot has every mon in the party and boxes, with where it is and its HP", function()
+  local snap = assert(Sync.snapshot(sworld()))
+  eq(snap.type, "sync", "type")
+  eq(snap.complete, true, "complete")
+  eq(#snap.mons, 3, "mons")
+  local by = {}
+  for _, m in ipairs(snap.mons) do by[m.pid] = m end
+  local p = by["0x262E1B25:0xF9D040AF"]
+  eq(p.species, "Piplup", "species")
+  eq(p.nick, "Pengwin", "nick")
+  eq(p.location, "Route 101", "location")
+  eq(p.where, "party", "where")
+  eq(p.hp, 31, "hp")
+  eq(by["0x0BA1EC41:0xF9D040AF"].hp, 0, "a fainted party mon has hp 0")
+  local b = by["0x128A564B:0xF9D040AF"]
+  eq(b.where, "box", "box mon")
+  eq(b.hp, nil, "box mons have no hp")
+  eq(b.location, "Route 102", "box mon location")
+end)
+
+test("a sync snapshot lists the defeated trainers and the badge count", function()
+  local m = sworld()
+  m:trainer_flag(615) m:trainer_flag(2) m:trainer_flag(864) m:trainer_flag(265) m:trainer_flag(267)
+  local snap = assert(Sync.snapshot(m))
+  eq(table.concat(snap.defeated, ","), "2,265,267,615,864", "defeated")
+  eq(snap.badges, 2, "badges")
+end)
+
+test("a sync snapshot with nothing in it still has lists, which JSON writes as arrays", function()
+  local m = Fake.new()
+  local snap = assert(Sync.snapshot(m))
+  eq(#snap.mons, 0, "mons")
+  eq(snap.badges, 0, "badges")
+  eq(J.encode(snap), '{"badges":0,"complete":true,"defeated":[],"mons":[],"type":"sync"}', "json")
+end)
+
+test("a sync snapshot leaves eggs out", function()
+  local m = sworld()
+  m:party_mon(2, { personality = 0x11112222, species = 261, egg = true })
+  eq(#assert(Sync.snapshot(m)).mons, 3, "mons")
+end)
+
+test("a mon that can't be read right now cancels the snapshot instead of being left out", function()
+  local m = sworld()
+  m:party_mon(1, { personality = 0x0BA1EC41, species = 261, bad_checksum = true })
+  local snap, why = Sync.snapshot(m)
+  eq(snap, nil, "snapshot")
+  assert(why:find("0x0BA1EC41:0xF9D040AF", 1, true), why)
+end)
+
+test("a sync snapshot waits for the end of a battle", function()
+  local m = sworld()
+  m:in_battle(true)
+  local snap, why = Sync.snapshot(m)
+  eq(snap, nil, "snapshot")
+  assert(why:find("battle"), why)
+  m:in_battle(false)
+  assert(Sync.snapshot(m))
+end)
+
+test("no sync snapshot before a save is loaded", function()
+  local m = Fake.new()
+  m:write32(A.sb2_ptr, 0)
+  local snap, why = Sync.snapshot(m)
+  eq(snap, nil, "snapshot")
+  eq(why, "no save loaded", "why")
+  m = Fake.new()
+  m:write32(A.sb1_ptr, 0)
+  eq((Sync.snapshot(m)), nil, "no trainer flags either")
+  m = Fake.new()
+  m:write32(A.storage_ptr, 0)
+  eq((Sync.snapshot(m)), nil, "no PC boxes either")
+end)
+
+-- syncToTracker (tracker.lua, loaded the way mGBA does, on fake globals) ------------------------------------------------
+
+-- Loads tracker.lua against a fake mGBA: `emu` is fake memory, `console` and `callbacks` record what they get, and
+-- `socket` is a relay that records every line sent to it (or refuses the connection when `listening` is false).
+local function tracker_world(opts)
+  opts = opts or {}
+  local m = sworld()
+  m:species_name(1, "Bulbasaur")
+  m:trainer_name(1, "Sawyer")
+  m:map_name(0, "Littleroot Town")
+  m:play_time(1, 0, 0)
+  local w = { mem = m, logs = {}, sent = {}, listening = opts.listening ~= false }
+  local net = {}
+  function net.tcp()
+    local sock = {}
+    function sock:connect() if w.listening then return true end return nil, "refused" end
+    function sock:hasdata() return false end
+    function sock:send(line) w.sent[#w.sent + 1] = line return #line end
+    function sock:close() end
+    return sock
+  end
+  local saved = {}
+  for _, k in ipairs({ "emu", "console", "callbacks", "socket" }) do saved[k] = _G[k] end
+  _G.emu = m
+  _G.console = { log = function(_, msg) w.logs[#w.logs + 1] = msg end }
+  _G.callbacks = { add = function(_, _, fn) w.frame = fn return 1 end, remove = function() end }
+  _G.socket = net
+  dofile(root .. "/lua/tracker.lua")
+  w.sync = _G.syncToTracker
+  function w.frames(n) for _ = 1, n or 1 do w.frame() end end
+  function w.logged(pattern)
+    for _, l in ipairs(w.logs) do if l:find(pattern) then return true end end
+    return false
+  end
+  function w.close()
+    for k, v in pairs(saved) do _G[k] = v end
+    _G.syncToTracker, _G.TRACKER_CB, _G.TRACKER_RELAY, _G.TRACKER_SESSION, _G.TRACKER_SEQ = nil, nil, nil, nil, nil
+  end
+  w.frames(2) -- the first frame connects to the relay
+  return w
+end
+
+local function with_tracker(opts, fn)
+  local w = tracker_world(opts)
+  local ok, err = pcall(fn, w)
+  w.close()
+  if not ok then error(err, 0) end
+end
+
+local function decode_sent(line)
+  -- the snapshot's fields, read back out of the one line the relay got
+  local t = {}
+  t.type = line:match('"type":"(%w+)"')
+  t.run = line:match('"run":"([^"]+)"')
+  t.playTime = tonumber(line:match('"playTime":(%d+)'))
+  t.id = line:match('"id":"([^"]+)"')
+  return t
+end
+
+test("syncToTracker sends one sync with the run, an id and the play time, and says what it sent", function()
+  with_tracker({}, function(w)
+    eq(w.sync(), true, "sent")
+    eq(#w.sent, 1, "lines")
+    local ev = decode_sent(w.sent[1])
+    eq(ev.type, "sync", "type")
+    eq(ev.run, "0xF9D040AF", "run")
+    eq(ev.playTime, 3600, "play time")
+    assert(ev.id:find("^0xF9D040AF:%x+%.1$"), ev.id)
+    assert(w.sent[1]:find('"complete":true', 1, true), w.sent[1])
+    assert(w.sent[1]:find('"pid":"0x128A564B:0xF9D040AF"', 1, true), "a box mon is in it")
+    assert(w.logged("sync: sent 3 mons, 0 defeated trainers, 0 badges"), "log")
+  end)
+end)
+
+test("syncToTracker stamps the play time of now, not of the last frame", function()
+  with_tracker({}, function(w)
+    w.mem:play_time(1, 0, 2) -- two seconds on, no frame in between
+    w.sync()
+    eq(decode_sent(w.sent[1]).playTime, 3602, "play time")
+  end)
+end)
+
+test("syncToTracker sends nothing in a battle, and the console says why", function()
+  with_tracker({}, function(w)
+    w.mem:in_battle(true)
+    eq(w.sync(), false, "sent")
+    eq(#w.sent, 0, "lines")
+    assert(w.logged("sync: not sent %(in battle"), "log")
+  end)
+end)
+
+test("syncToTracker sends nothing while a mon is unreadable", function()
+  with_tracker({}, function(w)
+    w.mem:party_mon(1, { personality = 0x0BA1EC41, species = 261, bad_checksum = true })
+    eq(w.sync(), false, "sent")
+    eq(#w.sent, 0, "lines")
+    assert(w.logged("sync: not sent %(couldn't read 0x0BA1EC41"), "log")
+    w.mem:party_mon(1, { personality = 0x0BA1EC41, species = 261 })
+    eq(w.sync(), true, "sent on the next try")
+  end)
+end)
+
+test("syncToTracker without a relay reports it was not sent", function()
+  with_tracker({ listening = false }, function(w)
+    eq(w.sync(), false, "sent")
+    eq(#w.sent, 0, "lines")
+    assert(w.logged("not sent: relay not connected"), "log")
+    assert(not w.logged("sync: sent"), "no success message")
+  end)
+end)
+
+test("a sync does not go out by itself, not even after a play-time jump", function()
+  with_tracker({}, function(w)
+    w.frames(60)
+    w.mem:play_time(0, 5, 0) -- a savestate from earlier was loaded
+    w.frames(60)
+    assert(w.logged("play time jumped"), "the jump was seen")
+    eq(#w.sent, 0, "nothing sent")
+  end)
+end)
+
+test("syncToTracker's ids keep counting with the other events", function()
+  with_tracker({}, function(w)
+    w.sync()
+    w.sync()
+    local a, b = decode_sent(w.sent[1]).id, decode_sent(w.sent[2]).id
+    assert(a ~= b, "two syncs have two ids")
+    assert(a:find("%.1$") and b:find("%.2$"), a .. " " .. b)
+  end)
 end)
 
 print(string.format("\n%d passed, %d failed", passed, failures))

@@ -15,7 +15,7 @@ mGBA (Lua tracker) ──NDJSON/TCP──▶ relay ──HTTPS──▶ Apps Scr
 | Area | State |
 |------|-------|
 | Game data (RAM / ROM map) | Party, battle, flags, names, PC boxes and screen ids found; catch and evolution behavior observed live. Doubles attacker still open |
-| Lua tracker | Battles (kills, deaths, splits) and catches including the starter done and live. Evolutions done and live. Output to the relay done (not yet live in mGBA). Trades, `sync` not started |
+| Lua tracker | Battles (kills, deaths, splits) and catches including the starter done and live. Evolutions done and live. Output to the relay done (not yet live in mGBA). `sync` snapshot built (sent by hand with `syncToTracker()`, not on a load). Trades not started |
 | Relay | Done (TCP, best effort, nothing stored); tested with a fake web app, and once by hand end to end against the dev sheet |
 | Apps Script / sheet | Web app, journal and reconcile done and tested on the dev sheet. Not on the real sheet |
 | Testing | Sheet tests (18), Lua tests (55) and relay tests (12) pass. Remote control for in-emulator checks exists; no automated emulator-in-the-loop or end-to-end test |
@@ -53,7 +53,7 @@ Details: [docs/MEMORY_MAP.md](docs/MEMORY_MAP.md), method in [docs/lua_progress/
 - [x] **Evolutions** (`mons.lua`): a known party mon with a new species, read the same with a valid checksum on two scans → `evolve {pid, from, to, nick?}`; `nick` only when the game renamed it. Same species name (a form change) is logged, not sent. Checked offline on the real Scatterbug → Spewpa states (`fixtures/private/r2-*`), and live: Skitty → Delcatty with a Moon Stone sent one `evolve` with `nick: "Delcatty"`. A level-up evolution right after a battle is skipped on purpose: runs level with the Endless Candy, so it rarely happens (the same scan would catch it once the battle ends)
   - [x] Web app: `evolve` sets the nickname when `nick` is sent, and its undo puts it back (dev sheet)
 - [ ] **Trades**: tracked id replaced by an unknown id with a different OT in the same slot. In Run & Bun gift mons come from NPC trades, so they always land in the party (no gift-to-PC case). To check on a real trade: the met location (vanilla uses 254, "in-game trade", which the map table doesn't cover) and the slot transition on the trade screen
-- [ ] **`sync`**: snapshot of mons, defeated trainers, splits and play time on script start and on any play-time discontinuity (today a jump only resets the battle tracker silently)
+- [x] **`sync` snapshot** (`sync.lua`): `syncToTracker()` from the scripting console sends every mon, defeated trainers, badges and play time; refuses in battle, with an unreadable mon or before a save is loaded. Manual only, by choice (never sent on a load). Tested on fake memory (the snapshot, and `tracker.lua` loaded on fake globals for the send), checked read-only on the real game, and reconciled on the dev sheet (`npm run test:sheet`)
 - Not needed: new-run detection. Starting a new run is manual (Reset Run on the sheet); the Lua side just sends events with the current trainer id as `run`
 - [~] Output to the relay (`relay_client.lua`): TCP to `127.0.0.1:38765`, reconnect every 2 s, events dropped while disconnected; never writes after the relay closes (SIGPIPE would kill mGBA); ids `<run>:<session>.<n>` stamped in `tracker.lua`. Written against mGBA 0.10.3's socket source; tested on a fake of its API and with `tracker.lua` on fake memory; not yet live in mGBA
 - [ ] Cheaper battle reads (fetch HP first, the rest only on change). Optional; do it with the party scans
@@ -95,7 +95,8 @@ Done and tested on the **dev copy** only.
 - [x] Read-only probes `lua/spike/probe.lua`, `probe2.lua`
 - [x] Remote control `lua/dev/remote.lua` + `tools/remote.py`: buttons, screenshots, savestates and watchers from a script (live)
 - [x] Tests for catches and evolutions
-- [ ] Tests for trades and `sync` as they are written
+- [x] Tests for the `sync` snapshot
+- [ ] Tests for trades as they are written
 - [ ] Emulator-in-the-loop test: mGBA with the ROM and a fixture state, assert on the emitted events. 0.10.3 has no `--script` flag, but the remote can load states and drive the game once loaded
 - [x] `npm run test:relay`: 12 relay tests (`node:test`), no network
 - [~] End-to-end: Lua output → relay → dev web app → sheet, run once by hand (not automated; the Lua part on fake memory and a fake socket)
