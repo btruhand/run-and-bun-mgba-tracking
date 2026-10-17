@@ -1,0 +1,22 @@
+#!/bin/sh
+# Refuse a feat/fix/refactor/test/perf commit that does not touch PROGRESS.md.
+# Skip it with a "Progress: none" line in the message (nothing to record, or already recorded).
+# Other types (docs, build, chore, ci, style) and merges, reverts and fixups are not checked.
+
+msg=$(grep -v '^#' "$1")
+type=$(printf '%s\n' "$msg" | sed -n '1s/^\([a-z]*\)\(([^)]*)\)\{0,1\}!\{0,1\}:.*/\1/p')
+
+case "$type" in
+  feat|fix|refactor|test|perf) ;;
+  *) exit 0 ;;
+esac
+
+printf '%s\n' "$msg" | grep -qi '^Progress: none' && exit 0
+git diff --cached --name-only | grep -qx 'PROGRESS.md' && exit 0
+
+cat >&2 <<MSG
+commit-msg: a $type commit should update PROGRESS.md (tick it off, or mark it dropped).
+  - stage PROGRESS.md and commit again, or
+  - add a "Progress: none" line to the message if there is nothing to record.
+MSG
+exit 1

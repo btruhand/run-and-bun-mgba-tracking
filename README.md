@@ -208,6 +208,10 @@ Requires Node 22 or newer (`engines` in `package.json`; `npm install` refuses ol
 
 `.env`, `.env.*`, `.clasp.json`, `.clasp.dev.json` and `fixtures/private/` are gitignored.
 
+### Commit hook
+
+`npm install` points git at `.githooks/` (the `prepare` script runs `git config core.hooksPath .githooks`). Its `commit-msg` hook refuses a `feat`, `fix`, `refactor`, `test` or `perf` commit that doesn't stage `PROGRESS.md`, so the progress doc is updated (ticked off, or marked as not going ahead) in the same commit. If there is nothing to record, add a `Progress: none` line to the commit message. Other types (`docs`, `build`, `chore`, ...), merges and reverts are not checked.
+
 ## Tests
 
 ```

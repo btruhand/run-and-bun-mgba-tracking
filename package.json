@@ -10,6 +10,7 @@
     "@google/clasp": "^3.4.1"
   },
   "scripts": {
+    "prepare": "git config core.hooksPath .githooks || true",
     "test": "echo \"Error: no test specified\" && exit 1",
     "gen-token": "node scripts/gen-token.js",
     "deploy": "scripts/deploy.sh",
