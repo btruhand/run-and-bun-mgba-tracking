@@ -121,6 +121,7 @@ In Run & Bun, gift mons come from NPC trades, and a traded mon always lands in t
 ### Death
 
 - One of your mons fainting in any battle (wild or trainer) is committed as `death` when the battle ends, once per mon.
+- A `death` can carry `killedBy`, read from `gBattlerAttacker` at the faint: `attack` (an enemy battler's), `friendly fire` (your other battler's, doubles), `self inflicted` (the mon's own: recoil, Explosion, Life Orb) or left out (not known). Like on a kill, a hazard / weather / status faint can read as `attack` until those are detected. Recorded in `_Events`, not used otherwise.
 - Run & Bun has no overworld fainting, so nothing outside battle is watched.
 - Revives are illegal in the ruleset, so there is no un-death logic; a manual sheet edit fixes mistakes.
 - A key that disappears from party and boxes is **not** a death (it may be in transit, released or traded). A `missing` event was dropped: `sync` finds mons that are gone.
@@ -129,8 +130,9 @@ In Run & Bun, gift mons come from NPC trades, and a traded mon always lands in t
 
 - Only when `gBattleTypeFlags` bit 3 says **trainer battle** (wild kills ignored). `gTrainerBattleOpponent_A` is stale after a battle, so it's only read when that bit is set.
 - Every frame in battle, each enemy battler's HP in `gBattleMons` is watched. A `> 0 → 0` drop counts only if species, level, max HP, personality and OT id are the same as on the previous frame (this rejects the switch-in glitch). Each enemy party slot is credited once (`key = <trainer>:<enemy slot>`).
-- **Singles:** credited to your mon on the field. That also gives the decided rule for indirect KOs (poison, weather, hazards, recoil, Destiny Bond): they count for the mon currently on the field.
-- **Doubles:** `gBattlerAttacker` is not located yet, so the kill goes to your leftmost live mon and the event carries `ambiguous: true` when both of yours were alive. Once the attacker is found, doubles credit becomes exact and an `indirect` flag can mark KOs the attacker didn't cause.
+- **Singles:** credited to your mon on the field (`killedBy` is `attack` when `gBattlerAttacker` is battler 0; the credit is the same either way). That also gives the decided rule for indirect KOs (poison, weather, hazards, recoil, Destiny Bond): they count for the mon currently on the field.
+- Two fields describe how the kill happened; both are recorded with the event in `_Events` and not used otherwise. `killedBy` is what killed the enemy, read from `gBattlerAttacker`: `attack` (one of yours), `friendly fire` (the enemy's other battler, doubles) or `self inflicted` (the fainted enemy itself: recoil, Explosion). It matches the values on a `death`. `hazard`, `weather` and `status` are reserved for when they can be detected. Until then the byte keeps its last value after such a KO, so those can read as one of the three. `fallback` says the credit came from a fallback rule instead of the attacker; the only one is `leftmost` (the leftmost of your battlers that was alive), and another rule would get its own value. The two are independent: any kill that isn't an attack of yours is credited by the fallback, so once `status` can be detected a poison KO carries both `killedBy: "status"` and `fallback: "leftmost"`.
+- **Doubles:** the kill goes to `gBattlerAttacker` when that is one of your battlers (0 or 2), even if it fainted in the same turn (Explosion). When the attacker is an enemy battler (recoil, an enemy's own move) nobody of yours attacked, so the kill falls back to your leftmost live mon, with `ambiguous: true` when both of yours were alive. Not done: an `indirect` flag for KOs the attacker didn't cause (poison, weather), since the byte keeps its last value and can't tell them apart.
 - The event carries the split at that moment (leaders defeated + 1), the trainer id and the enemy's name.
 
 ### Split
@@ -145,8 +147,8 @@ clock, in hex, when the script was first loaded in this mGBA, and `n` counts up;
 
 ```json
 {"type":"catch","pid":"0xA1B2C3D4:0x1234ABCD","species":"Starly","nick":"Starly","location":"Route 102"}
-{"type":"kill","pid":"...","split":2,"enemy":"Roxanne's Nosepass","trainer":"<trainerId>","key":"<trainerId>:<enemySlot>","ambiguous":true}   // ambiguous only in doubles
-{"type":"death","pid":"..."}
+{"type":"kill","pid":"...","split":2,"enemy":"Roxanne's Nosepass","trainer":"<trainerId>","key":"<trainerId>:<enemySlot>","killedBy":"attack"}   // killedBy and fallback are optional and independent: a kill that isn't an attack of yours has "fallback":"leftmost" and a killedBy of "friendly fire" or "self inflicted", plus "ambiguous":true when both of your mons were alive
+{"type":"death","pid":"...","killedBy":"attack"}   // killedBy optional: attack | friendly fire | self inflicted
 {"type":"evolve","pid":"...","from":"Scatterbug","to":"Spewpa","nick":"Spewpa"}   // nick only if the game renamed it
 {"type":"split","badges":3}
 {"type":"trade","old_pid":"...","pid":"...","species":"Nincada","nick":"","location":"In-game Trade"}   // not sent yet
@@ -248,7 +250,7 @@ another port (the tracker reads `TRACKER_RELAY_PORT`).
 - **Relay down / offline.** Events are dropped (logged in the mGBA console or the relay's terminal) if the relay isn't running, or if their request fails 4 times in a row (about 7 s when the network is down; up to 4 minutes if every attempt runs into the 60 s timeout). Fix the row by hand; `sync`, once built, will correct catches, species, deaths and badges on the next load, but not kill credit.
 - **Reset Run while events are in flight.** An event is delivered or dropped within seconds unless the web app hangs, so pressing Reset Run before starting the new game is enough.
 - **Apps Script quotas/latency.** A handful of events per battle; each request takes a few seconds, and the web app's lock runs overlapping requests one at a time; events that arrive within the same 200 ms share a request.
-- **Odd moves** (Pursuit, Future Sight, Perish Song) in doubles may be credited to the wrong mon until the attacker is read; `ambiguous` marks the doubles cases.
+- **Odd moves** (Pursuit, Future Sight, Perish Song) and end-of-turn damage in doubles go to whoever `gBattlerAttacker` last named, which may not be the mon that caused the KO; the cases where it names an enemy battler are marked `ambiguous`.
 - **Address drift.** Addresses are for Run & Bun **1.0.7** and live in `lua/addresses.lua`. The tracker checks the ROM's name tables at start and refuses to run on anything else.
 - **Manual edits vs. journal.** Inverses are conditional and manual edits win; `_Issues` records any skipped inverse.
 - **Nuzlocke mistakes and play testing** (recatching a mon, duplicate species): handled without errors, never blocked.

@@ -53,6 +53,21 @@ f53965 Yanma  33/33 lvl9       settles
 
 A bare "enemy hp reached 0" rule credited a kill at the stale frames. Requiring species, level, max hp, personality and OT id to match the previous frame rejects them. The `BattleMon` personality (`+0x4c`) and OT id (`+0x58`) also identify the enemy party slot exactly. Debouncing was rejected because the glitch lasts about 2 seconds.
 
+## `gBattlerAttacker` evidence (doubles)
+
+Found by watching a real double battle (Luxray + Floatzel vs two enemies) without pressing anything. A watcher scanned `0x02023000..0x02024800` every frame and logged each byte that moved between 0 and 3, plus every byte change inside the four `gBattleMons` entries; PP drops in `gBattleMons` gave the true attacker and the frame of each action. Of ~700 candidate bytes, only `0x02023594` held 2, then 1, then 0 at the three PP drops. Its changes lined up with every action of the turn, including a flinched mon that never spent PP:
+
+```
+f266869  0x02023594 -> 2   0x02023595 -> 3   Floatzel Fake Out on Purugly (PP drops f266903)
+f267072  0x02023594 -> 3   0x02023595 -> 2   Purugly's turn, flinched
+f267172  0x02023594 -> 1   0x02023595 -> 2   Simipour hits Floatzel (PP drops f267205)
+f267407  0x02023594 -> 0   0x02023595 -> 1   Luxray hits Simipour (PP drops f267434; Simipour hp 74 -> 0 at f267680)
+```
+
+It also read right on later turns (a switch, Fake Tears, two more attacks). The neighbours match the vanilla order (`gBattlerTarget` next). The new credit then ran against a live KO: with Luxray (battler 0) and Salazzle (battler 2) both alive, the attacker byte was 2 from f304546 and the KO of Masquerain at f304737 was credited to Salazzle, no `ambiguous`. The old rule would have credited Luxray.
+
+Not observed live: a KO by something other than an attack (poison, weather, recoil), where the byte keeps its last value.
+
 ## Catch and evolution evidence
 
 Frame trace from the remote session (party slot 4, then 3 after a deposit compacted the party; `chk` is the substruct checksum):

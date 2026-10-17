@@ -123,6 +123,7 @@ function F:enemy_mon(slot, m) self:mon(A.enemy_party + slot * A.mon_size, m) end
 function F:in_battle(on) self:write8(A.in_battle, on and 0x02 or 0x00) end
 function F:battle_type(flags) self:write32(A.battle_type, flags) end
 function F:opponent(id) self:write16(A.opponent_a, id) end
+function F:attacker(b) self:write8(A.battler_attacker, b) end
 function F:outcome(v) self:write8(A.battle_outcome, v) end
 
 function F:battle_mon(b, m)

@@ -8,8 +8,8 @@ Where the mGBA side stands. For the addresses see [../MEMORY_MAP.md](../MEMORY_M
 
 | Event | Emitted when |
 |-------|--------------|
-| `kill` | an enemy mon faints in a trainer battle; credited to your mon on the field. Carries `split` (leaders defeated + 1), `trainer`, `key` (`<trainer>:<enemy party slot>`), `enemy`, and `ambiguous` in doubles |
-| `death` | one of your mons faints in any battle (wild or trainer); sent when the battle ends, once per mon |
+| `kill` | an enemy mon faints in a trainer battle; credited to your mon on the field (in doubles, to `gBattlerAttacker`). Carries `split` (leaders defeated + 1), `trainer`, `key` (`<trainer>:<enemy party slot>`), `enemy`, `killedBy` (`attack` when `gBattlerAttacker` was yours, `friendly fire` when it was the enemy's other battler, `self inflicted` when it was the fainted enemy itself; `hazard` / `weather` / `status` are planned, not detected yet), `fallback` (`leftmost` when the attacker wasn't one of yours) and `ambiguous` (a `leftmost` fallback with both of your mons alive, so doubles only) |
+| `death` | one of your mons faints in any battle (wild or trainer); sent when the battle ends, once per mon. May carry `killedBy`: `attack` (an enemy battler's), `friendly fire` (your other battler's, doubles), `self inflicted` (its own: recoil, Explosion), left out when not known |
 | `split` | a gym leader's flag is set after a battle; `badges` is how many of the eight leaders are defeated |
 
 **Catches** (`lua/mons.lua`), confirmed in mGBA on a new game: starter Chimchar sent before the first battle, then six wild catches each sent when their battle ended, the last one (Skitty, with a full party) read from Box 1:

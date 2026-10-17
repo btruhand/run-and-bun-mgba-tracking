@@ -15,6 +15,7 @@ return {
   opponent_a   = 0x20381ae,          -- gTrainerBattleOpponent_A (u16); NOT cleared after a battle
   battle_mons  = 0x20233fc,
   battle_mon_size = 0x5c,
+  battler_attacker = 0x2023594,      -- gBattlerAttacker (u8, battler 0..3); gBattlerTarget is the next byte
   battle_outcome = 0x2023716,        -- gBattleOutcome (u8): 1 won, 4 ran, 7 caught; kept after the battle
   bm = { species = 0x00, hp = 0x2a, level = 0x2c, max_hp = 0x2e, personality = 0x4c, ot_id = 0x58 },
 

@@ -14,7 +14,7 @@ mGBA (Lua tracker) ──NDJSON/TCP──▶ relay ──HTTPS──▶ Apps Scr
 
 | Area | State |
 |------|-------|
-| Game data (RAM / ROM map) | Party, battle, flags, names, PC boxes and screen ids found; catch and evolution behavior observed live. Doubles attacker still open |
+| Game data (RAM / ROM map) | Party, battle, flags, names, PC boxes and screen ids found; catch and evolution behavior observed live. `gBattlerAttacker` found (live) |
 | Lua tracker | Battles (kills, deaths, splits), catches (including the starter) and evolutions done and live. Output to the relay done, not yet live in mGBA. `sync` snapshot built, sent by hand. Trades not started |
 | Relay | Done; tested with a fake web app, and once by hand end to end against the dev sheet |
 | Apps Script / sheet | Web app, journal and reconcile done and tested on the dev sheet. Not on the real sheet |
@@ -33,7 +33,7 @@ Details: [MEMORY_MAP.md](MEMORY_MAP.md), method in [lua_progress/spike-log.md](l
 - [x] PC boxes, vanilla layout (live)
 - [x] `gMain.callback2` screen ids (overworld, bag, party menu, evolution, PC, battle) (live)
 - [x] Catch, evolution and PC moves traced frame by frame (live)
-- [ ] `gBattlerAttacker`, to credit doubles kills exactly
+- [x] `gBattlerAttacker`, to credit doubles kills exactly (live)
 - [x] Gym leader ids confirmed against a real leader fight (live)
 - Skipped on purpose: badge flags (the split comes from leader flags), `gBattlerPartyIndexes`
 
@@ -42,9 +42,12 @@ Details: [MEMORY_MAP.md](MEMORY_MAP.md), method in [lua_progress/spike-log.md](l
 - [x] Entry point `tracker.lua`: ROM check, play-time-jump reset, `EVENT {json}` console output, event ids
 - [x] Battle tracker `battle.lua`
   - [x] `kill`: trainer battles only, credited to the mon on the field (live)
+  - [x] `killedBy` (`attack` / `friendly fire` / `self inflicted`) and `fallback: "leftmost"` on kills; recorded in `_Events`, not used by the sheet
+  - [ ] `killedBy` `hazard` / `weather` / `status`: needs a turn-phase signal (not found); until then those KOs can read as `attack` and the like
   - [x] `death`: any battle, sent when it ends, once per mon (live, wild)
+  - [x] `killedBy` on deaths: `attack` / `friendly fire` / `self inflicted` from `gBattlerAttacker` (tests only); `hazard` / `weather` / `status` as for kills
   - [x] `split`: gym leader flags set after a battle (live)
-  - [~] Doubles: leftmost live mon credited, `ambiguous` flagged (tests only)
+  - [x] Doubles: credited to `gBattlerAttacker` when it is one of yours (live); otherwise leftmost live mon, `ambiguous` flagged (tests only)
   - [ ] Blackout (whole party wiped) in a wild fight, not seen live
 - [x] **Catches** (`mons.lua`): from the battle outcome, from the party or boxes, and the starter outside battle (live, including a catch with a full party that goes to a box)
 - [x] **Evolutions** (`mons.lua`): `evolve {pid, from, to, nick?}` (live). A level-up evolution right after a battle is skipped on purpose; runs level with the Endless Candy, so it rarely happens
@@ -52,8 +55,7 @@ Details: [MEMORY_MAP.md](MEMORY_MAP.md), method in [lua_progress/spike-log.md](l
 - [x] **`sync` snapshot** (`sync.lua`): `syncToTracker()` from the scripting console sends every mon, defeated trainers, badges and play time. Manual only, by choice (never sent on a load)
 - [~] Output to the relay (`relay_client.lua`): TCP to the relay, reconnect on a timer, events dropped while disconnected. Tested on a fake of mGBA's socket API; not yet live in mGBA
 - [ ] Cheaper battle reads (fetch HP first, the rest only on change). Optional; do it with the party scans
-- [ ] Doubles: use `gBattlerAttacker` once found, then drop `ambiguous`
-- [ ] `indirect` flag on kills (needs the attacker)
+- [ ] `indirect` flag on kills: the attacker byte keeps its last value after poison, weather or recoil, so it can't tell those apart; needs something else
 - Not needed: new-run detection. Starting a new run is manual (Reset Run on the sheet)
 
 ## 3. Relay (`relay/relay.mjs`)
@@ -78,7 +80,7 @@ Done and tested on the **dev copy** only.
 - [x] Dev-only `dump` / `reset` / `undo` actions (refuse unless `ENV=dev`)
 - [-] Event for a mon that vanishes from party and boxes (`missing`): not needed, `sync` covers it
 - [-] "Resync" sheet menu item: not needed, the relay never writes back so the sheet can't ask the tracker, and `syncToTracker()` in the mGBA console already does it by hand
-- [ ] Use the `ambiguous` flag on kills (today ignored; could write an `_Issues` row)
+- [-] Use the `ambiguous` flag (and `killedBy` / `fallback`) on kills in the sheet: not needed, they are recorded in `_Events` with the event and the sheet doesn't act on them
 - [ ] Known limit: one enemy mon's credit across two jumped-between timelines goes to the most recent killer
 
 ## 5. Testing and tooling
@@ -111,4 +113,4 @@ Done and tested on the **dev copy** only.
 1. **Trades** (same party scan as evolutions)
 2. A live session with the tracker and relay against the dev sheet
 3. Roll out to the real sheet
-4. Doubles attacker and polish
+4. Polish

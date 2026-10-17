@@ -56,6 +56,7 @@ Values seen: overworld (also with the start menu open) `0x080a3e6d`, bag `0x081d
 | `gBattleTypeFlags` | `0x02023364` | live | u32. Bit 3 (`0x8`) = trainer battle, bit 0 = double. Seen: `0x08` and `0x0c` for trainers, `0x00` and `0x04` for wild (bit 2 is not a trainer marker), `0x10` / `0x14` for the scripted first battle. Bit 2 (`0x04`) is added a couple of frames after `gMain.inBattle` sets, so the value read on the battle's first frame lacks it (`0x00` wild, `0x10` first battle); the trainer bit is already there (`0x08` for the rival) |
 | `gTrainerBattleOpponent_A` | `0x020381ae` | live | u16 RAM trainer id. **Not cleared after a battle**: in a wild battle it still holds the last trainer |
 | `gBattleOutcome` | `0x02023716` | live | u8, vanilla values: `0` during a battle, `1` won, `4` ran, `7` caught (others unseen). Set at the end of the battle script (for a catch: after the nickname prompt, not at "Gotcha!"). Reset to 0 when a battle starts and **kept after it ends**, so read it when `gMain.inBattle` clears. 65 references in the ROM's code |
+| `gBattlerAttacker` | `0x02023594` | live | u8, battler 0..3. Set to the acting battler as each action starts, before its PP drops (a flinched mon's turn sets it too), and kept until the next action. A switch also sets it (to the battler switching). Followed by `gBattlerTarget` at `0x02023595` (u8), then `gBattlerFainted` and `gEffectBattler` by the vanilla order (not checked). For a spread move the target is the last one handled, so don't read the victim from it |
 | `gBattleMons` | `0x020233fc` | live | `BattleMon` is `0x5c` bytes; battler 0 = you, 1 = opponent, 2/3 = partners in doubles |
 
 `BattleMon` fields (offsets within one entry):
@@ -109,6 +110,7 @@ Table entries 770-801 repeat each leader in groups of four, and 844-847 repeat t
 ## Behaviors that matter
 
 - **`gBattleMons` is rewritten in pieces on a switch-in.** A replacement is briefly shown with the previous mon's hp, max hp and level (observed: `Spinda hp=30/30 lvl=8`, then `Spinda hp=0/27 lvl=7`, then the old Swirlix again, then Spinda for good). The glitch can last ~2 seconds (stale Krabby sat in the slot for ~106 frames). A kill is an enemy `hp > 0 → 0` drop only if species, level, max hp, personality and OT id are the same as on the previous frame.
+- **`gBattlerAttacker` keeps its last value.** After an enemy faints from something that isn't an attack (poison, weather, recoil) it still names whoever acted last, which can be an enemy battler or a mon that already fainted. Only the doubles credit reads it (see DESIGN.md, Kill).
 - **`gTrainerBattleOpponent_A` goes stale**, so "trainer battle" must come from `gBattleTypeFlags`, not from a nonzero opponent id.
 - **Unaligned reads are rotated.** mGBA's `emu:read32` at an address that isn't a multiple of 4 returns the aligned word rotated. Reading the trainer id (`sb2 + 0x0a`) as one u32 gave `0x000140AF` instead of `0xF9D040AF`. Use two u16 reads.
 - The trainer flag is set on the same frame `gMain.inBattle` clears; it stays 0 after a lost fight.
@@ -123,7 +125,6 @@ Table entries 770-801 repeat each leader in groups of four, and 844-847 repeat t
 
 ## Not found yet
 
-- **`gBattlerAttacker`**, to credit doubles kills exactly instead of "leftmost live mon, `ambiguous`".
 - **Badge flags.** Not needed (the split comes from leader flags). Vanilla numbering puts them at `sb1 + 0x1720`, but that byte is identical in an early game and a later save, so the numbering differs.
 - `gTrainerBattleOpponent_B`, `gBattlerPartyIndexes`: not needed so far.
 
