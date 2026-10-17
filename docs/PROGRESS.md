@@ -7,7 +7,7 @@ Legend: `[x]` done and checked, `[~]` done but only partly checked (noted), `[ ]
 
 ```
 mGBA (Lua tracker) ──NDJSON/TCP──▶ relay ──HTTPS──▶ Apps Script web app ──▶ Rankings sheet
-   done                              done             done on dev copy
+   done                              done             done, on the real sheet
 ```
 
 ## Summary
@@ -17,9 +17,9 @@ mGBA (Lua tracker) ──NDJSON/TCP──▶ relay ──HTTPS──▶ Apps Scr
 | Game data (RAM / ROM map) | Party, battle, flags, names, PC boxes and screen ids found; catch and evolution behavior observed live. `gBattlerAttacker` found (live) |
 | Lua tracker | Battles (kills, deaths, splits), catches (including the starter) and evolutions done and live. Output to the relay done, not yet live in mGBA. `sync` snapshot built, sent by hand. Trades not started |
 | Relay | Done; tested with a fake web app, and once by hand end to end against the dev sheet |
-| Apps Script / sheet | Web app, journal and reconcile done and tested on the dev sheet. Not on the real sheet |
+| Apps Script / sheet | Web app, journal and reconcile done, tested on the dev sheet and deployed to the real one |
 | Testing | Unit-style tests for the sheet, Lua and relay. Remote control for in-emulator checks exists; no automated end-to-end test |
-| Rollout to the real sheet | Not started |
+| Rollout to the real sheet | Web app deployed; some splits played fully. Doesn't cover everything yet |
 
 ## 1. Game data (RAM / ROM)
 
@@ -54,8 +54,6 @@ Details: [MEMORY_MAP.md](MEMORY_MAP.md), method in [lua_progress/spike-log.md](l
 - [ ] **Trades**: tracked id replaced by an unknown id with a different OT in the same slot. In Run & Bun gift mons come from NPC trades, so they always land in the party. To check on a real trade: the met location (vanilla uses 254, "in-game trade", which the map table doesn't cover) and the slot transition on the trade screen
 - [x] **`sync` snapshot** (`sync.lua`): `syncToTracker()` from the scripting console sends every mon, defeated trainers, badges and play time. Manual only, by choice (never sent on a load)
 - [~] Output to the relay (`relay_client.lua`): TCP to the relay, reconnect on a timer, events dropped while disconnected. Tested on a fake of mGBA's socket API; not yet live in mGBA
-- [ ] Cheaper battle reads (fetch HP first, the rest only on change). Optional; do it with the party scans
-- [ ] `indirect` flag on kills: the attacker byte keeps its last value after poison, weather or recoil, so it can't tell those apart; needs something else
 - Not needed: new-run detection. Starting a new run is manual (Reset Run on the sheet)
 
 ## 3. Relay (`relay/relay.mjs`)
@@ -69,7 +67,7 @@ Details: [MEMORY_MAP.md](MEMORY_MAP.md), method in [lua_progress/spike-log.md](l
 
 ## 4. Apps Script / sheet (`appsscript/`)
 
-Done and tested on the **dev copy** only.
+Tested on the **dev copy**; the web app is also deployed to the real sheet.
 
 - [x] `Rankings.js` helpers shared by the manual buttons and the web app
 - [x] Web app `doPost` / `doGet`: token check, lock, idempotency by event id, run mismatch held
@@ -98,19 +96,16 @@ Done and tested on the **dev copy** only.
 
 ## 6. Rollout to the real sheet
 
-- [ ] Deploy the web app to the real sheet (`clasp` prod file, Script Properties `TOKEN`, no `ENV=dev`) and approve its permissions once
-- [ ] Run with the relay against the real sheet for a few battles; compare with manual counts
+- [x] Deploy the web app to the real sheet (`clasp` prod file, Script Properties `TOKEN`, no `ENV=dev`) and approve its permissions once
+- [x] Run with the relay against the real sheet for a few battles; compare with manual counts
 - [x] Decided how to start a new run: press Reset Run; the first event after it sets the new run
-- [ ] Play a full split live and fix attribution problems
+- [~] Play a full split live and fix attribution problems: some splits played fully; it doesn't cover everything yet
 
 ## 7. Docs
 
 - [x] README, MEMORY_MAP, lua_progress, DESIGN.md, relay section
-- [ ] README section for the captures once they exist
 
 ## Next
 
 1. **Trades** (same party scan as evolutions)
-2. A live session with the tracker and relay against the dev sheet
-3. Roll out to the real sheet
-4. Polish
+2. Polish
