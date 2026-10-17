@@ -30,23 +30,10 @@ Supporting modules: `lua/gen3.lua` (party struct decoding, names, flags, play ti
 
 - The enemy's `gBattleMons` slot is rewritten in pieces on a switch-in, so the tracker only counts an HP drop when the mon's identity is unchanged since the previous frame. Without this, the first Pineco/Clobbopus-style phantom kills appear.
 - "Trainer battle" comes from `gBattleTypeFlags` bit 3. The opponent id is stale after a battle and is only used when that bit is set.
-- Play-time jumps (loading a savestate or save) reset the battle tracker silently. There is no `sync` yet, so the sheet is not told.
+- Play-time jumps (loading a savestate or save) reset the battle tracker silently. The sheet is not told; run `syncToTracker()` in the scripting console to reconcile it.
 - A faint is committed as a `death` when the battle ends. Run & Bun has no overworld fainting, so nothing else is needed.
 - mGBA keeps `require`'s cache between script loads. `tracker.lua` clears its own modules on every load; loading a script does not unload an earlier one (its frame callback keeps running until mGBA restarts).
 
 ## Dev tool: driving mGBA from a script
 
 `lua/dev/remote.lua` + `tools/remote.py` drive a running mGBA from a script (buttons, screenshots, savestates, per-frame watchers). See [../../tools/README.md](../../tools/README.md).
-
-## Not done
-
-- **Trades** (next): a new party mon with another OT id is only logged today.
-- **`sync`**: snapshot (mons, defeated trainers, splits, play time) on script start and on any play-time discontinuity, so the sheet can reconcile after savestates.
-- **Relay connection live**: `relay_client.lua` is written against mGBA 0.10.3's socket source and tested on a fake of its API, not yet in mGBA.
-- **Doubles credit**: `gBattlerAttacker` is not located, so doubles kills are credited to the leftmost live mon and flagged `ambiguous`.
-
-## Not yet confirmed live
-
-- A **gym leader win**. The leader ids (265-272) come from the trainer table, not from a fight. The first win should produce `kill … split: N` followed by `split {badges: N}`.
-- **Double battles**: handled in code and in tests, never seen in play.
-- A mid-battle faint followed by a **blackout** (whole party wiped) in a wild fight.

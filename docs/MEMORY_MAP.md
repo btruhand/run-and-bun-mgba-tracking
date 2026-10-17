@@ -89,7 +89,7 @@ Values seen: overworld (also with the start menu open) `0x080a3e6d`, bag `0x081d
 
 **RAM trainer id = `gTrainers` index.** `gTrainerBattleOpponent_A` indexes the table directly, as in vanilla. Confirmed live on trainer 318: the game shows "Youngster Calvin", entry 318's name is Calvin, its party pointer (`name + 0x20`) lists Calvin's Poochyena, Lillipup and Rookidee, and winning sets flag bit 318. An earlier reading took the party fields at `name - 0xC` / `name - 8`, which are the end of the *previous* entry, and concluded the id was one less than the entry; that was wrong. Trainer flags use the same id.
 
-Gym and League trainers (RAM id = table index; **not yet seen live** — the first gym leader win will confirm them):
+Gym and League trainers (RAM id = table index; confirmed live on a gym leader win):
 
 | Trainer | RAM id |
 |---------|--------|

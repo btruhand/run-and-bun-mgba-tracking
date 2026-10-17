@@ -1,8 +1,8 @@
 # Progress
 
-The design is in [DESIGN.md](DESIGN.md); the Lua details are in [docs/lua_progress/](docs/lua_progress/README.md).
+The design is in [DESIGN.md](DESIGN.md); the Lua tracker's behavior is in [docs/lua_progress/README.md](docs/lua_progress/README.md).
 
-Legend: `[x]` done and checked, `[~]` done but only partly checked (noted), `[ ]` not started.
+Legend: `[x]` done and checked, `[~]` done but only partly checked (noted), `[ ]` not started, `[-]` decided against (with the reason).
 "Live" means confirmed in mGBA during play. "Dev sheet" means confirmed on the copy of the spreadsheet, not the real one.
 
 ```
@@ -18,7 +18,7 @@ mGBA (Lua tracker) ──NDJSON/TCP──▶ relay ──HTTPS──▶ Apps Scr
 | Lua tracker | Battles (kills, deaths, splits), catches (including the starter) and evolutions done and live. Output to the relay done, not yet live in mGBA. `sync` snapshot built, sent by hand. Trades not started |
 | Relay | Done; tested with a fake web app, and once by hand end to end against the dev sheet |
 | Apps Script / sheet | Web app, journal and reconcile done and tested on the dev sheet. Not on the real sheet |
-| Testing | Unit-style tests for the sheet, Lua and relay. Remote control for in-emulator checks exists; no automated emulator-in-the-loop or end-to-end test |
+| Testing | Unit-style tests for the sheet, Lua and relay. Remote control for in-emulator checks exists; no automated end-to-end test |
 | Rollout to the real sheet | Not started |
 
 ## 1. Game data (RAM / ROM)
@@ -34,7 +34,7 @@ Details: [docs/MEMORY_MAP.md](docs/MEMORY_MAP.md), method in [docs/lua_progress/
 - [x] `gMain.callback2` screen ids (overworld, bag, party menu, evolution, PC, battle) (live)
 - [x] Catch, evolution and PC moves traced frame by frame (live)
 - [ ] `gBattlerAttacker`, to credit doubles kills exactly
-- [ ] Gym leader ids confirmed against a real leader fight (derived from the table so far)
+- [x] Gym leader ids confirmed against a real leader fight (live)
 - Skipped on purpose: badge flags (the split comes from leader flags), `gBattlerPartyIndexes`
 
 ## 2. Lua tracker (`lua/`)
@@ -43,7 +43,7 @@ Details: [docs/MEMORY_MAP.md](docs/MEMORY_MAP.md), method in [docs/lua_progress/
 - [x] Battle tracker `battle.lua`
   - [x] `kill`: trainer battles only, credited to the mon on the field (live)
   - [x] `death`: any battle, sent when it ends, once per mon (live, wild)
-  - [x] `split`: gym leader flags set after a battle (tests only; no leader win seen live yet)
+  - [x] `split`: gym leader flags set after a battle (live)
   - [~] Doubles: leftmost live mon credited, `ambiguous` flagged (tests only)
   - [ ] Blackout (whole party wiped) in a wild fight, not seen live
 - [x] **Catches** (`mons.lua`): from the battle outcome, from the party or boxes, and the starter outside battle (live, including a catch with a full party that goes to a box)
@@ -76,8 +76,8 @@ Done and tested on the **dev copy** only.
 - [x] `sync` reconcile: rewind, forward jump, killer re-attribution, adds missing mons
 - [x] Undo latest tracking change button
 - [x] Dev-only `dump` / `reset` / `undo` actions (refuse unless `ENV=dev`)
-- [ ] Event for a mon that vanishes from party and boxes (`missing`); the design has it, the web app doesn't
-- [ ] "Resync" sheet menu item (from the design)
+- [-] Event for a mon that vanishes from party and boxes (`missing`): not needed, `sync` covers it
+- [-] "Resync" sheet menu item: not needed, the relay never writes back so the sheet can't ask the tracker, and `syncToTracker()` in the mGBA console already does it by hand
 - [ ] Use the `ambiguous` flag on kills (today ignored; could write an `_Issues` row)
 - [ ] Known limit: one enemy mon's credit across two jumped-between timelines goes to the most recent killer
 
@@ -90,9 +90,9 @@ Done and tested on the **dev copy** only.
 - [x] Read-only probes `lua/spike/probe.lua`, `probe2.lua`
 - [x] Remote control `lua/dev/remote.lua` + `tools/remote.py`: buttons, screenshots, savestates and watchers from a script (live)
 - [ ] Tests for trades, as they are written
-- [ ] Emulator-in-the-loop test: mGBA with the ROM and a fixture state, assert on the emitted events. mGBA has no `--script` flag, but the remote can load states and drive the game once loaded
+- [-] Emulator-in-the-loop test: not needed, it would mean running mGBA, and a person can load a state and check by hand
 - [~] End-to-end: Lua output → relay → dev web app → sheet, run once by hand (not automated; the Lua part on fake memory and a fake socket)
-- [ ] `tools/replay.py` to post recorded event streams (from the design; may not be needed)
+- [-] `tools/replay.py` to post recorded event streams: not needed, nothing records events to a file, and `tests/sheet/run.mjs` and `sim.mjs` already post hand-written sequences
 
 ## 6. Rollout to the real sheet
 
@@ -110,5 +110,5 @@ Done and tested on the **dev copy** only.
 
 1. **Trades** (same party scan as evolutions)
 2. A live session with the tracker and relay against the dev sheet
-3. Roll out to the real sheet; the first real leader win confirms the `split` flow
+3. Roll out to the real sheet
 4. Doubles attacker and polish

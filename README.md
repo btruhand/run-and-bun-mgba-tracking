@@ -283,7 +283,3 @@ python3 tools/remote.py 'press("A"); wait(30); shot("now")'   # screenshot in .r
 ```
 
 This is how catches, evolutions and PC moves were observed (the traces are in [docs/lua_progress/spike-log.md](docs/lua_progress/spike-log.md)). It is also the basis for checking the tracker against the real game rather than fake memory. Setup, the commands a chunk can use, and how it works are in [tools/README.md](tools/README.md). `tools/state.py` reads the same memory out of saved states without the emulator. In Claude Code, the `remote-controlling-mgba` skill and the `mgba-driver` subagent use these tools.
-
-## Not built yet
-
-See [DESIGN.md](DESIGN.md): detection of trades.
