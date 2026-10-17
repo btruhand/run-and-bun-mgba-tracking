@@ -2,7 +2,7 @@
 
 Tooling to keep a Google Sheets kill tracker (the `Rankings` tab of the "R&B kill sheet") up to date automatically while playing Pokémon Run & Bun in a hardcore Nuzlocke.
 
-The long-term goal is for mGBA to feed the sheet directly; see [DESIGN.md](DESIGN.md) for the full design and [PROGRESS.md](PROGRESS.md) for what is done and what is left. **What exists today:** a refactored Apps Script project with a web app endpoint that accepts game events, and an mGBA Lua script that tracks battles (kills, deaths, splits), catches and evolutions. The Lua script sends events over a local socket to a small relay, which forwards them to the sheet.
+The long-term goal is for mGBA to feed the sheet directly; see [DESIGN.md](docs/DESIGN.md) for the full design and [PROGRESS.md](docs/PROGRESS.md) for what is done and what is left. **What exists today:** a refactored Apps Script project with a web app endpoint that accepts game events, and an mGBA Lua script that tracks battles (kills, deaths, splits), catches and evolutions. The Lua script sends events over a local socket to a small relay, which forwards them to the sheet.
 
 ## How to use
 
@@ -210,7 +210,7 @@ Requires Node 22 or newer (`engines` in `package.json`; `npm install` refuses ol
 
 ### Commit hook
 
-`npm install` points git at `.githooks/` (the `prepare` script runs `git config core.hooksPath .githooks`). Its `commit-msg` hook refuses a `feat`, `fix`, `refactor`, `test` or `perf` commit that doesn't stage `PROGRESS.md`, so the progress doc is updated (ticked off, or marked as not going ahead) in the same commit. If there is nothing to record, add a `Progress: none` line to the commit message. Other types (`docs`, `build`, `chore`, ...), merges and reverts are not checked.
+`npm install` points git at `.githooks/` (the `prepare` script runs `git config core.hooksPath .githooks`). Its `commit-msg` hook refuses a `feat`, `fix`, `refactor`, `test` or `perf` commit that doesn't stage `docs/PROGRESS.md`, so the progress doc is updated (ticked off, or marked as not going ahead) in the same commit. If there is nothing to record, add a `Progress: none` line to the commit message. Other types (`docs`, `build`, `chore`, ...), merges and reverts are not checked.
 
 ## Tests
 
@@ -236,7 +236,7 @@ Load `lua/tracker.lua` in mGBA 0.10.3 (Tools → Scripting → File → Load scr
 | `catch`  | a mon joined you: a battle ended with the mon caught (it is read from the party or box it was stored in, so the nickname is final), or a new mon with your OT id appeared in the party outside battle (the starter). `species`, `nick`, `location` (met location name)                                                                                  |
 | `evolve` | a known party mon's species changed, read the same with a valid checksum on two party scans (about a second apart). `from`, `to` are species names; `nick` is sent only when the game renamed the mon, which it does when the mon still had its species name (Scatterbug → Spewpa). A change that keeps the species name (a form change) is only logged |
 
-Species names are sent as the sheet's `Sprites` tab spells them (full names where the ROM shortens them, Nidoran-F/-M, Flabebe, form names for Oricorio, Lycanroc and Urshifu); see DESIGN.md "Event schema". Events carry `run` (your trainer id), `playTime` and an `id`, `<run>:<session>.<n>`, unique across script reloads and mGBA restarts; the web app skips ids it has already applied. Kills in doubles use the leftmost live mon and set `ambiguous` when both of yours were alive (the attacker isn't read yet). A jump in play time (loading a savestate or a save) drops the current battle without emitting anything.
+Species names are sent as the sheet's `Sprites` tab spells them (full names where the ROM shortens them, Nidoran-F/-M, Flabebe, form names for Oricorio, Lycanroc and Urshifu); see docs/DESIGN.md "Event schema". Events carry `run` (your trainer id), `playTime` and an `id`, `<run>:<session>.<n>`, unique across script reloads and mGBA restarts; the web app skips ids it has already applied. Kills in doubles use the leftmost live mon and set `ambiguous` when both of yours were alive (the attacker isn't read yet). A jump in play time (loading a savestate or a save) drops the current battle without emitting anything.
 
 Mons already in the party and boxes when the script starts, or after loading a savestate or save, are treated as known and not sent: the sheet may already have them (hand-entered rows have no id), and `sync` will reconcile them. A mon is sent at most once per timeline, and the sheet ignores a catch for an id it already has. Catching a species you already have is sent as a new mon (and logged); evolution lines are not checked.
 

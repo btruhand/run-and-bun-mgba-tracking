@@ -3,7 +3,7 @@
 Automatically keep the existing "R&B kill sheet" (Google Sheets, `Rankings` tab) up to date while playing
 Pokémon Run & Bun 1.0.7 in mGBA 0.10.3. This file is the design and the reasons behind it. What is built and
 checked is in [PROGRESS.md](PROGRESS.md); addresses and observed game behavior are in
-[docs/MEMORY_MAP.md](docs/MEMORY_MAP.md).
+[MEMORY_MAP.md](MEMORY_MAP.md).
 
 Status in one line: the Lua tracker (kills, deaths, splits, catches, evolutions), the relay and the web app are built
 and work end to end on the dev copy; trades and `sync` are not.
@@ -256,7 +256,8 @@ another port (the tracker reads `TRACKER_RELAY_PORT`).
 ## Repo layout
 
 ```
-DESIGN.md, PROGRESS.md, README.md
+README.md
+docs/          DESIGN.md, PROGRESS.md, MEMORY_MAP.md, lua_progress/
 appsscript/     Sorter.js, Rankings.js, WebApp.js, appsscript.json
 lua/            tracker.lua (mGBA entry point), battle.lua, mons.lua, gen3.lua, addresses.lua, json.lua
 lua/dev/        remote.lua (drive mGBA from a script; development only)

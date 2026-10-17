@@ -1,6 +1,6 @@
 # Progress
 
-The design is in [DESIGN.md](DESIGN.md); the Lua tracker's behavior is in [docs/lua_progress/README.md](docs/lua_progress/README.md).
+The design is in [DESIGN.md](DESIGN.md); the Lua tracker's behavior is in [lua_progress/README.md](lua_progress/README.md).
 
 Legend: `[x]` done and checked, `[~]` done but only partly checked (noted), `[ ]` not started, `[-]` decided against (with the reason).
 "Live" means confirmed in mGBA during play. "Dev sheet" means confirmed on the copy of the spreadsheet, not the real one.
@@ -23,7 +23,7 @@ mGBA (Lua tracker) ──NDJSON/TCP──▶ relay ──HTTPS──▶ Apps Scr
 
 ## 1. Game data (RAM / ROM)
 
-Details: [docs/MEMORY_MAP.md](docs/MEMORY_MAP.md), method in [docs/lua_progress/spike-log.md](docs/lua_progress/spike-log.md).
+Details: [MEMORY_MAP.md](MEMORY_MAP.md), method in [lua_progress/spike-log.md](lua_progress/spike-log.md).
 
 - [x] Party, party count, enemy party, mon struct decode (live)
 - [x] Save block pointers, play time, trainer id (live)

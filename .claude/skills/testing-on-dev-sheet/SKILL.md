@@ -39,7 +39,7 @@ It asks for a `dump` first and stops if the web app refuses (anything without `E
 | `{"action": "dump"}` | print the sheet at this point |
 | `{"raw": "null"}` | post this body as is (malformed requests) |
 
-Each event gets `run: "sim"`, `id: "sim:<n>"` and `playTime` 10, 20, 30, … unless it sets them; `"id": null` sends none. Event fields are in README "Lua tracker" and "Web app"; `sync` is `{type: "sync", mons: [{pid, species, nick, hp, where: "party"|"box"}], defeated: [trainer ids], badges, complete}` (DESIGN.md "Event schema"); the tracker doesn't send it yet, so only simulations exercise it. Example, the evolution the live sheet rejected:
+Each event gets `run: "sim"`, `id: "sim:<n>"` and `playTime` 10, 20, 30, … unless it sets them; `"id": null` sends none. Event fields are in README "Lua tracker" and "Web app"; `sync` is `{type: "sync", mons: [{pid, species, nick, hp, where: "party"|"box"}], defeated: [trainer ids], badges, complete}` (docs/DESIGN.md "Event schema"); the tracker doesn't send it yet, so only simulations exercise it. Example, the evolution the live sheet rejected:
 
 ```json
 [

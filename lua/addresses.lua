@@ -40,6 +40,6 @@ return {
   map_count      = 213,
 
   -- RAM trainer ids of the eight gym leaders, in table order (Roxanne .. Juan; Run & Bun fights Brawly first, see
-  -- DESIGN.md "Splits"). The split is how many of these are defeated, so the order doesn't matter
+  -- docs/DESIGN.md "Splits"). The split is how many of these are defeated, so the order doesn't matter
   gym_leaders = { 265, 266, 267, 268, 269, 270, 271, 272 },
 }

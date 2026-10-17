@@ -1,4 +1,4 @@
--- The `sync` snapshot: what the game has right now, for the sheet to reconcile its event log against (DESIGN.md,
+-- The `sync` snapshot: what the game has right now, for the sheet to reconcile its event log against (docs/DESIGN.md,
 -- "Savestates & old saves"). snapshot(mem) returns the event without id, run and play time (the caller adds them),
 -- or nil and the reason it can't be taken:
 --   sync {mons:[{pid, species, nick, location, where, hp?}], defeated:[trainerId...], badges, complete:true}

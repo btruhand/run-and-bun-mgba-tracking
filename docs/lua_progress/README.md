@@ -1,6 +1,6 @@
 # Lua tracker: progress
 
-Where the mGBA side stands. For the addresses see [../MEMORY_MAP.md](../MEMORY_MAP.md); for how they were found see [spike-log.md](spike-log.md); for the end-to-end design see [../../DESIGN.md](../../DESIGN.md).
+Where the mGBA side stands. For the addresses see [../MEMORY_MAP.md](../MEMORY_MAP.md); for how they were found see [spike-log.md](spike-log.md); for the end-to-end design see [../DESIGN.md](../DESIGN.md).
 
 ## Done
 

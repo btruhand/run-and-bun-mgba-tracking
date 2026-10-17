@@ -3,7 +3,7 @@
  */
 
 // Web app endpoint: receives events from the local relay (which gets them from the mGBA Lua script)
-// and applies them to the Rankings sheet. See DESIGN.md.
+// and applies them to the Rankings sheet. See docs/DESIGN.md.
 //
 // Script Properties:
 //   TOKEN  shared secret, required on every request

@@ -50,4 +50,4 @@ Tool reference: `tools/README.md`. Addresses: `docs/MEMORY_MAP.md` (also `lua/ad
 
 ## Writing up
 
-Record new addresses and behaviors in `docs/MEMORY_MAP.md` (with status live / state / static), the method and evidence in `docs/lua_progress/spike-log.md`, and tick `PROGRESS.md`. Say what was observed versus inferred.
+Record new addresses and behaviors in `docs/MEMORY_MAP.md` (with status live / state / static), the method and evidence in `docs/lua_progress/spike-log.md`, and tick `docs/PROGRESS.md`. Say what was observed versus inferred.
