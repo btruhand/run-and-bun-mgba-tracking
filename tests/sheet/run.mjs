@@ -45,7 +45,7 @@ const byId = (s, id) => s.rows.find((r) => r.id === id);
 
 const A = '0xA:1', B = '0xB:1', C = '0xC:1';
 const catchEv = (playTime, pid, species, loc = 'Route 101') => ev('catch', playTime, { pid, species, nick: '', location: loc, source: 'catch' });
-const killEv = (playTime, pid, split, trainer, slot = 0) => ev('kill', playTime, { pid, split, trainer, key: `${trainer}:${slot}`, enemy: 'x', indirect: false });
+const killEv = (playTime, pid, split, trainer, slot = 0) => ev('kill', playTime, { pid, split, trainer, key: `${trainer}:${slot}`, enemy: 'x' });
 
 const scenarios = {
   async 'catch adds a row with zeroed KC and Alive status'() {
