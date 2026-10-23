@@ -58,7 +58,7 @@ local function on_frame()
   if play_time and (pt < play_time or pt > play_time + JUMP) then
     log(string.format("play time jumped %d -> %d (savestate or save loaded)", play_time, pt))
     battle:reset()
-    mons:reset()
+    mons:reset(Mons.LOAD_SETTLE)
   end
   play_time = pt
   battle:step()

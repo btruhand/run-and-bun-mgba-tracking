@@ -32,6 +32,7 @@ M.__index = M
 
 local CAUGHT = 7
 local SCAN_EVERY = 30   -- frames between party scans (twice a second)
+M.LOAD_SETTLE = 60  -- frames to let a save load finish before reading what is already there (see reset)
 local LOOKUP_SCANS = 20 -- scans (~10 s) to keep looking for a caught mon that has not been stored yet
 
 function M.new(mem, emit, log)
@@ -41,8 +42,11 @@ function M.new(mem, emit, log)
 end
 
 -- Forget what was seen (play time jumped: a savestate or save was loaded). The next step re-reads the party and
--- boxes as known, silently.
-function M:reset()
+-- boxes as known, silently. After a real save load the play time is valid a few frames before the party is copied in,
+-- so the caller passes `settle`: frames to wait before that read (nothing is stepped meanwhile), or every mon that
+-- then appears would look new and be sent as a catch.
+function M:reset(settle)
+  self.settle = settle or 0
   self.known = nil      -- pid -> {species, nick} from the last valid read (empty until one), mons that need no
                         -- catch event; nil until seeded
   self.foreign = {}     -- pid -> true, mons with another OT id already logged
@@ -197,6 +201,10 @@ function M:scan()
 end
 
 function M:step()
+  if self.settle > 0 then
+    self.settle = self.settle - 1
+    return
+  end
   if not self.known then self:seed() end
   local in_battle = (self.mem:read8(A.in_battle) >> 1) & 1 == 1
   if in_battle and not self.in_battle then self.enemies = self:enemy_ids()

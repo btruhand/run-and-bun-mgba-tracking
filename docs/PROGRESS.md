@@ -40,6 +40,7 @@ Details: [MEMORY_MAP.md](MEMORY_MAP.md), method in [lua_progress/spike-log.md](l
 ## 2. Lua tracker (`lua/`)
 
 - [x] Entry point `tracker.lua`: ROM check, play-time-jump reset, `EVENT {json}` console output, event ids
+  - [x] After a play-time jump the mon tracker waits 60 frames before reading what is already there: on a soft reset + Continue the party is copied in after the play time, and seeding at once sent a catch for every mon (seen live)
 - [x] Battle tracker `battle.lua`
   - [x] `kill`: trainer battles only, credited to the mon on the field (live)
   - [x] `killedBy` (`attack` / `friendly fire` / `self inflicted`) and `fallback: "leftmost"` on kills; recorded in `_Events`, not used by the sheet

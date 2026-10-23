@@ -695,6 +695,18 @@ test("after a savestate load the mons in it are known; a catch replayed after th
   eq(types(w.events), "catch,catch", "sent again (the sheet ignores the repeat id)")
 end)
 
+test("observed: a save load whose party arrives after the play time sends nothing for the mons in it", function()
+  local w = mworld()
+  w.step(5)
+  w.mons:reset(Mons.LOAD_SETTLE) -- play time is valid, the party is not copied in yet
+  w.step(10)
+  for i, mon in ipairs(TEAM) do w.mem:party_mon(i - 1, mon) end
+  w.step(Mons.LOAD_SETTLE)
+  w.scans(5)
+  eq(#w.events, 0, "events")
+  eq(w.logged("mons already in the party"), true, "seeded after the party arrived")
+end)
+
 test("a caught mon that never shows up is given up on without an event", function()
   local w = mworld({ party = { TEAM[1] } })
   w.battle({ POOCH })
