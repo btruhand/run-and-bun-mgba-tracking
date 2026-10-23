@@ -100,7 +100,7 @@ local HELP = {
   "  Type it in the input line below to send the sheet everything the game has",
   "  now (every mon, defeated trainers, badges) so it matches the game. Can be used",
   "  to align the sheet if it has drifted somehow, or after loading a savestate or",
-  "  an older save.",
+  "  an older save. Ignored if the save isn't the run the sheet is tracking.",
   "",
   "How to use (setup and playing):",
   "  https://github.com/btruhand/run-and-bun-mgba-tracking#how-to-use",

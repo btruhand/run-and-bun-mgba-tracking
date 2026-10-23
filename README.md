@@ -178,6 +178,16 @@ Every event has `id` (unique; repeats are ignored), `run` (identifies the save/r
 
 Responses: `{ok: true, results: [{id, status}]}` where status is `applied`, `duplicate`, `ignored` (unknown mon, full table), `failed` (the script threw while applying it, e.g. the sheet rejected a value), `held` (event from a different run; press Reset Run to switch) or `rejected` (no type, run or id). An error outside any one event (the lock, opening the sheet) answers `{ok: false, error: <message>}`.
 
+### Which run the sheet is tracking
+
+The sheet tracks one run (save) at a time, identified by `run`: the save's trainer id and secret id, like `0x1234ABCD`. To find it:
+
+- In Apps Script, open Project Settings (the gear icon) → Script Properties. `RUN` is the run the sheet is locked to; it has no `RUN` until the first event arrives, and after Reset Run.
+  - ![Run ID example](docs/assets/run_id_example.png)
+- In the spreadsheet, View → Hidden sheets → `_Events`: the `run` column holds each event's run.
+
+Compare it with the `"run"` in the `EVENT {json}` lines in mGBA's scripting console. If they differ, the web app writes an `_Issue` for every event that has a different run. You must `Reset Run` if you'd like to track a different run.
+
 ### Event log and `sync`
 
 Every event the web app receives is recorded in a hidden `_Events` tab, with its `status` (as in the response; a sync is `reconciled`) and, for applied ones, how to undo it. A resent event that was applied is answered `duplicate`; one that wasn't (`failed`, `ignored`, `held`) is handled again, for example when the relay retries a request whose answer was lost, and its row is updated, keeping the links to the earlier issues. Problems go to a hidden `_Issues` tab: unknown mon, full table, skipped undo, and any error the script hits, with its message. An event's `issue reference` column lists the `_Issues` rows about it, each a link to its row. Only `applied` events are rewound, re-applied or undone.
