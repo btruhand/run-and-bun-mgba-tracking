@@ -1202,7 +1202,23 @@ local function tracker_world(opts)
   local saved = {}
   for _, k in ipairs({ "emu", "console", "callbacks", "socket" }) do saved[k] = _G[k] end
   _G.emu = m
-  _G.console = { log = function(_, msg) w.logs[#w.logs + 1] = msg end }
+  w.buffers = {}
+  _G.console = {
+    log = function(_, msg) w.logs[#w.logs + 1] = msg end,
+    createBuffer = function(_, name)
+      local b = { name = name, rows_text = {}, cleared = 0 }
+      function b:clear() self.cleared = self.cleared + 1 self.rows_text = {} end
+      function b:setSize(cols, rows) self.cols, self.rows = cols, rows end
+      function b:moveCursor(x, y) self.x, self.y = x, y end
+      function b:print(t)
+        assert(not t:find("\n", 1, true), "a newline inside print() mangles the layout in mGBA")
+        local row = self.rows_text[self.y] or ""
+        self.rows_text[self.y] = row:sub(1, self.x) .. t
+      end
+      w.buffers[#w.buffers + 1] = b
+      return b
+    end,
+  }
   _G.callbacks = { add = function(_, _, fn) w.frame = fn return 1 end, remove = function() end }
   _G.socket = net
   dofile(root .. "/lua/tracker.lua")
@@ -1214,7 +1230,7 @@ local function tracker_world(opts)
   end
   function w.close()
     for k, v in pairs(saved) do _G[k] = v end
-    _G.syncToTracker, _G.TRACKER_CB, _G.TRACKER_RELAY, _G.TRACKER_SESSION, _G.TRACKER_SEQ = nil, nil, nil, nil, nil
+    _G.syncToTracker, _G.TRACKER_HELP, _G.TRACKER_CB, _G.TRACKER_RELAY, _G.TRACKER_SESSION, _G.TRACKER_SEQ = nil, nil, nil, nil, nil
   end
   w.frames(2) -- the first frame connects to the relay
   return w
@@ -1286,6 +1302,33 @@ test("syncToTracker without a relay reports it was not sent", function()
     eq(#w.sent, 0, "lines")
     assert(w.logged("not sent: relay not connected"), "log")
     assert(not w.logged("sync: sent"), "no success message")
+  end)
+end)
+
+test("loading the script puts the help text in its own buffer, with syncToTracker and the how-to-use link", function()
+  with_tracker({}, function(w)
+    eq(#w.buffers, 1, "buffers")
+    local b = w.buffers[1]
+    eq(b.name, "Auto-tracker help text", "name")
+    local text = {}
+    for y = 0, b.rows - 1 do
+      local line = b.rows_text[y] or ""
+      assert(#line <= b.cols, "line wider than the buffer: " .. line)
+      text[#text + 1] = line
+    end
+    text = table.concat(text, "\n")
+    assert(text:find("syncToTracker()", 1, true), "syncToTracker")
+    assert(text:find("https://github.com/btruhand/run-and-bun-mgba-tracking#how-to-use", 1, true), "link")
+    for y in pairs(b.rows_text) do assert(y >= 0 and y < b.rows, "row outside the buffer: " .. y) end
+  end)
+end)
+
+test("reloading the script reuses the help buffer instead of adding another", function()
+  with_tracker({}, function(w)
+    dofile(root .. "/lua/tracker.lua")
+    eq(#w.buffers, 1, "buffers")
+    eq(w.buffers[1].cleared, 2, "cleared on each load")
+    assert(w.buffers[1].rows_text[0]:find("Auto-tracker help", 1, true), "still filled")
   end)
 end)
 

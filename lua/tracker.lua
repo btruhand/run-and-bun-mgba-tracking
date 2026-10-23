@@ -84,4 +84,31 @@ end
 
 if TRACKER_CB then callbacks:remove(TRACKER_CB) end
 TRACKER_CB = callbacks:add("frame", on_frame)
-log("tracker: running (Run & Bun 1.0.7 verified); syncToTracker() sends a sync")
+log("Running (Run & Bun 1.0.7 verified); help is under \"Auto-tracker help text\" in the list on the left")
+
+-- The help goes in a text buffer (the list on the left of the scripting window, shown in the top pane), a fixed grid
+-- of columns, so the lines are wrapped here. Each line is printed on its own row: a "\n" inside print() leaves the
+-- cursor where the following text wraps at the wrong column. A reload reuses the buffer, or each load would add another.
+local HELP = {
+  "Auto-tracker help",
+  "",
+  "Catches, kills, deaths, evolutions and badges reach the sheet on their own.",
+  "",
+  "Manual commands:",
+  "",
+  "syncToTracker()",
+  "  Type it in the input line below to send the sheet everything the game has",
+  "  now (every mon, defeated trainers, badges) so it matches the game. Can be used",
+  "  to align the sheet if it has drifted somehow, or after loading a savestate or",
+  "  an older save.",
+  "",
+  "How to use (setup and playing):",
+  "  https://github.com/btruhand/run-and-bun-mgba-tracking#how-to-use",
+}
+if not TRACKER_HELP then TRACKER_HELP = console:createBuffer("Auto-tracker help text") end
+TRACKER_HELP:clear()
+TRACKER_HELP:setSize(80, #HELP)
+for row, line in ipairs(HELP) do
+  TRACKER_HELP:moveCursor(0, row - 1)
+  TRACKER_HELP:print(line)
+end

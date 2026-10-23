@@ -55,6 +55,7 @@ Details: [MEMORY_MAP.md](MEMORY_MAP.md), method in [lua_progress/spike-log.md](l
 - [x] **Evolutions** (`mons.lua`): `evolve {pid, from, to, nick?}` (live). A level-up evolution right after a battle is skipped on purpose; runs level with the Endless Candy, so it rarely happens
 - [ ] **Trades**: tracked id replaced by an unknown id with a different OT in the same slot. In Run & Bun gift mons come from NPC trades, so they always land in the party. To check on a real trade: the met location (vanilla uses 254, "in-game trade", which the map table doesn't cover) and the slot transition on the trade screen
 - [x] **`sync` snapshot** (`sync.lua`): `syncToTracker()` from the scripting console sends every mon, defeated trainers, badges and play time. Manual only, by choice (never sent on a load)
+- [x] **Help text**: loading `tracker.lua` adds an "Auto-tracker help text" buffer to the scripting window (what `syncToTracker()` is for, link to the README's how-to-use). Printed row by row, as a newline inside `print()` wraps the text at the wrong column
 - [~] Output to the relay (`relay_client.lua`): TCP to the relay, reconnect on a timer, events dropped while disconnected. Tested on a fake of mGBA's socket API; not yet live in mGBA
 - Not needed: new-run detection. Starting a new run is manual (Reset Run on the sheet)
 
