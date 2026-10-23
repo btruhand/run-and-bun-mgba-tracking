@@ -43,9 +43,10 @@ Details: [MEMORY_MAP.md](MEMORY_MAP.md), method in [lua_progress/spike-log.md](l
 - [x] Battle tracker `battle.lua`
   - [x] `kill`: trainer battles only, credited to the mon on the field (live)
   - [x] `killedBy` (`attack` / `friendly fire` / `self inflicted`) and `fallback: "leftmost"` on kills; recorded in `_Events`, not used by the sheet
-  - [ ] `killedBy` `hazard` / `weather` / `status`: needs a turn-phase signal (not found); until then those KOs can read as `attack` and the like
+  - [x] `killedBy: "status"` (poison / burn damage at the end of the turn) on kills and deaths, from where the battle script is (`gBattlescriptCurrInstr`); burn, toxic and poison deaths seen live; an enemy kill by status is tests only
+  - [ ] `killedBy` `hazard` / `weather`: separate battle scripts, not looked at yet; until then those KOs can read as `attack` and the like
   - [x] `death`: any battle, sent when it ends, once per mon (live, wild)
-  - [x] `killedBy` on deaths: `attack` / `friendly fire` / `self inflicted` from `gBattlerAttacker` (tests only); `hazard` / `weather` / `status` as for kills
+  - [x] `killedBy` on deaths: `attack` / `friendly fire` / `self inflicted` from `gBattlerAttacker` (tests only); `hazard` / `weather` as for kills
   - [x] `split`: gym leader flags set after a battle (live)
   - [x] Doubles: credited to `gBattlerAttacker` when it is one of yours (live); otherwise leftmost live mon, `ambiguous` flagged (tests only)
   - [ ] Blackout (whole party wiped) in a wild fight, not seen live

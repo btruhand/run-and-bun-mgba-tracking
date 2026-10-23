@@ -216,6 +216,107 @@ test("singles: your mon killed by the enemy's attack is killedBy attack, by itse
   eq(faint(0).killedBy, "self inflicted", "itself")
 end)
 
+test("verify rejects a ROM whose poison / burn damage script is elsewhere", function()
+  local m = Fake.new()
+  m:species_name(1, "Bulbasaur")
+  m:trainer_name(1, "Sawyer")
+  m:map_name(0, "Littleroot Town")
+  eq(G.verify(m), true, "the expected ROM")
+  m:write8(A.status_dmg_script[1] + 0x3a + 1, 0x31)
+  local ok, why = G.verify(m)
+  eq(ok, false, "burn message id changed")
+  eq(why, "the poison / burn battle script is not where expected", "why")
+end)
+
+-- Observed (docs/MEMORY_MAP.md, "Detecting status KOs"): a burned Pidgey at 1 hp, end of turn. gBattlerAttacker and
+-- gBattlerTarget are both the burned battler itself, and hp reaches 0 with the script just past `datahpupdate`.
+local BURN_FAINT = 0x0833ac55
+
+test("observed: your mon killed by burn damage is killedBy status, though gBattlerAttacker is itself", function()
+  local w = world({ enemies = { SWIRLIX } })
+  w.begin()
+  w.mem:attacker(0)
+  w.mem:battlescript(0x0833ac7a) -- BattleScript_BurnTurnDmg
+  w.step()
+  w.mem:battlescript(BURN_FAINT)
+  w.mem:battle_mon(0, { species = 393, hp = 0, level = 12, max_hp = 38, personality = PIPLUP.personality })
+  w.step()
+  w.mem:battlescript(0x08339926)
+  w.step()
+  w.finish()
+  eq(types(w.events), "death", "events")
+  eq(w.events[1].killedBy, "status", "killedBy")
+end)
+
+-- Toxic and regular poison were observed in this same tail (hp 1 -> 0 at 0x0833ac55, attacker 0). This only checks that
+-- the range counts a faint at the poison entry's own message.
+test("a faint at the start of the poison damage script (its message) is killedBy status too", function()
+  local w = world({ enemies = { SWIRLIX } })
+  w.begin()
+  w.mem:attacker(0)
+  w.mem:battlescript(A.status_dmg_script[1] + 3)
+  w.mem:battle_mon(0, { species = 393, hp = 0, level = 12, max_hp = 38, personality = PIPLUP.personality })
+  w.step()
+  w.finish()
+  eq(w.events[1].killedBy, "status", "killedBy")
+end)
+
+test("the same faint outside the status damage script stays self inflicted (recoil)", function()
+  for _, ptr in ipairs({ 0x0833ac3f, 0x0833ac61, 0x08336fa5, 0 }) do -- just before, just past, an attack, none
+    local w = world({ enemies = { SWIRLIX } })
+    w.begin()
+    w.mem:attacker(0)
+    w.mem:battlescript(ptr)
+    w.mem:battle_mon(0, { species = 393, hp = 0, level = 12, max_hp = 38, personality = PIPLUP.personality })
+    w.step()
+    w.finish()
+    eq(w.events[1].killedBy, "self inflicted", string.format("killedBy at %08x", ptr))
+  end
+end)
+
+test("a faint a frame after the script moved on still counts, two frames after does not", function()
+  local function faint_after(frames)
+    local w = world({ enemies = { SWIRLIX } })
+    w.begin()
+    w.mem:attacker(0)
+    w.mem:battlescript(BURN_FAINT)
+    w.step()
+    w.mem:battlescript(0x08339926)
+    w.step(frames - 1)
+    w.mem:battle_mon(0, { species = 393, hp = 0, level = 12, max_hp = 38, personality = PIPLUP.personality })
+    w.step()
+    w.finish()
+    return w.events[1].killedBy
+  end
+  eq(faint_after(1), "status", "next frame")
+  eq(faint_after(2), "self inflicted", "two frames later")
+end)
+
+test("an enemy that burns to death is a kill with killedBy status, credited to the mon on the field", function()
+  local w = world({ enemies = { SWIRLIX } })
+  w.begin()
+  w.mem:attacker(1) -- the burned enemy itself
+  w.mem:battlescript(BURN_FAINT)
+  w.enemy(0, SWIRLIX, 0)
+  eq(types(w.events), "kill", "events")
+  eq(w.events[1].pid, "0x262E1B25:0xF9D040AF", "pid")
+  eq(w.events[1].killedBy, "status", "killedBy")
+  eq(w.events[1].fallback, "leftmost", "fallback")
+  eq(w.events[1].ambiguous, nil, "ambiguous")
+end)
+
+test("doubles: an enemy burned to death is a status kill that falls back, flagged when both of yours are alive", function()
+  local w = world({ flags = 0x9, enemies = { SWIRLIX } })
+  w.mem:battle_mon(2, GOSSI)
+  w.begin()
+  w.mem:attacker(1)
+  w.mem:battlescript(BURN_FAINT)
+  w.enemy(0, SWIRLIX, 0)
+  eq(w.events[1].killedBy, "status", "killedBy")
+  eq(w.events[1].fallback, "leftmost", "fallback")
+  eq(w.events[1].ambiguous, true, "ambiguous")
+end)
+
 test("a death keeps the cause of the first faint of the mon", function()
   local w = world({ flags = 0x9, enemies = { SWIRLIX } })
   w.mem:battle_mon(2, GOSSI)

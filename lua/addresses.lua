@@ -16,6 +16,7 @@ return {
   battle_mons  = 0x20233fc,
   battle_mon_size = 0x5c,
   battler_attacker = 0x2023594,      -- gBattlerAttacker (u8, battler 0..3); gBattlerTarget is the next byte
+  battlescript_ptr = 0x202359c,      -- gBattlescriptCurrInstr (u32): where the battle script is, a ROM address
   battle_outcome = 0x2023716,        -- gBattleOutcome (u8): 1 won, 4 ran, 7 caught; kept after the battle
   bm = { species = 0x00, hp = 0x2a, level = 0x2c, max_hp = 0x2e, personality = 0x4c, ot_id = 0x58 },
 
@@ -33,6 +34,9 @@ return {
   box_mon_size = 80,
 
   -- ROM tables
+  -- Battle script of the end-of-turn poison / burn damage: BattleScript_PoisonTurnDmg (prints the message) up to the end
+  -- of the shared BattleScript_DoStatusTurnDmg tail (BattleScript_BurnTurnDmg at 0x0833ac7a jumps into it). Half open
+  status_dmg_script = { 0x0833ac40, 0x0833ac61 },
   species_names  = 0x083a0f80, -- 11 bytes per name, indexed by species id
   trainers       = 0x08398884, -- gTrainers, name field of entry 0; indexed by RAM trainer id
   trainer_stride = 0x28,

@@ -57,6 +57,7 @@ Values seen: overworld (also with the start menu open) `0x080a3e6d`, bag `0x081d
 | `gTrainerBattleOpponent_A` | `0x020381ae` | live | u16 RAM trainer id. **Not cleared after a battle**: in a wild battle it still holds the last trainer |
 | `gBattleOutcome` | `0x02023716` | live | u8, vanilla values: `0` during a battle, `1` won, `4` ran, `7` caught (others unseen). Set at the end of the battle script (for a catch: after the nickname prompt, not at "Gotcha!"). Reset to 0 when a battle starts and **kept after it ends**, so read it when `gMain.inBattle` clears. 65 references in the ROM's code |
 | `gBattlerAttacker` | `0x02023594` | live | u8, battler 0..3. Set to the acting battler as each action starts, before its PP drops (a flinched mon's turn sets it too), and kept until the next action. A switch also sets it (to the battler switching). Followed by `gBattlerTarget` at `0x02023595` (u8), then `gBattlerFainted` and `gEffectBattler` by the vanilla order (not checked). For a spread move the target is the last one handled, so don't read the victim from it |
+| `gBattlescriptCurrInstr` | `0x0202359c` | live | u32 ROM address of the battle script command about to run (`0x0833xxxx`), changing every few frames while a script runs. Sits 8 bytes after `gBattlerAttacker`. Used to tell poison / burn damage apart from an attack (see "Detecting status KOs") |
 | `gBattleMons` | `0x020233fc` | live | `BattleMon` is `0x5c` bytes; battler 0 = you, 1 = opponent, 2/3 = partners in doubles |
 
 `BattleMon` fields (offsets within one entry):
@@ -68,6 +69,7 @@ Values seen: overworld (also with the start menu open) `0x080a3e6d`, bag `0x081d
 | `+0x2c` | level (u8) |
 | `+0x2e` | max hp (u16) |
 | `+0x4c` | personality (u32) |
+| `+0x50` | status1 (u32): `0x10` = burn and `0x80` = toxic seen live (toxic also has its counter in bits 8-10: `0x380` = counter 3); `0x08` = poison seen live. Not used by the tracker |
 | `+0x58` | OT id (u32) |
 
 ## Mon struct (party layout, 100 bytes)
@@ -110,7 +112,8 @@ Table entries 770-801 repeat each leader in groups of four, and 844-847 repeat t
 ## Behaviors that matter
 
 - **`gBattleMons` is rewritten in pieces on a switch-in.** A replacement is briefly shown with the previous mon's hp, max hp and level (observed: `Spinda hp=30/30 lvl=8`, then `Spinda hp=0/27 lvl=7`, then the old Swirlix again, then Spinda for good). The glitch can last ~2 seconds (stale Krabby sat in the slot for ~106 frames). A kill is an enemy `hp > 0 → 0` drop only if species, level, max hp, personality and OT id are the same as on the previous frame.
-- **`gBattlerAttacker` keeps its last value.** After an enemy faints from something that isn't an attack (poison, weather, recoil) it still names whoever acted last, which can be an enemy battler or a mon that already fainted. Only the doubles credit reads it (see DESIGN.md, Kill).
+- **`gBattlerAttacker` keeps its last value.** After an enemy faints from something that isn't an attack (weather, hazards, recoil) it still names whoever acted last, which can be an enemy battler or a mon that already fainted. Only the doubles credit reads it (see DESIGN.md, Kill). Poison and burn damage at the end of the turn are different: they set it, and `gBattlerTarget`, to the damaged battler itself, which is what recoil looks like, so the byte can't tell them apart.
+- **Poison and burn KOs are told apart from attacks by `gBattlescriptCurrInstr`**, not by `gBattlerAttacker` (which names the damaged mon itself there, like recoil). See "Detecting status KOs" below.
 - **`gTrainerBattleOpponent_A` goes stale**, so "trainer battle" must come from `gBattleTypeFlags`, not from a nonzero opponent id.
 - **Unaligned reads are rotated.** mGBA's `emu:read32` at an address that isn't a multiple of 4 returns the aligned word rotated. Reading the trainer id (`sb2 + 0x0a`) as one u32 gave `0x000140AF` instead of `0xF9D040AF`. Use two u16 reads.
 - The trainer flag is set on the same frame `gMain.inBattle` clears; it stays 0 after a lost fight.
@@ -122,6 +125,49 @@ Table entries 770-801 repeat each leader in groups of four, and 844-847 repeat t
 - **Catch with a full party**: nothing changes at "Gotcha!". The mon is written to the first free box slot right after the nickname prompt, while `gMain.inBattle` is still set. It has the player's OT id and the route as met location (Poochyena, met 16 = Route 101).
 - **Starter**: given by script when you pick it, before the first battle, and it can't be swapped afterwards. Traced on a new game: the choice screen is `callback2 = 0x08164079` with an empty party (count 0); 3 frames after confirming, party slot 0 holds the starter (met location 255, level 5, the run's OT id, nickname = species name, valid checksum) and the count becomes 1, all on the same frame. The first battle starts about 130 frames later (`inBattle` set), after one failed-checksum frame. That fight (Galarian Zigzagoon L2 in a new game) has `gBattleTypeFlags = 0x14` (vanilla `IS_MASTER | FIRST_BATTLE`), no trainer bit.
 - `gMain.inBattle` (`+0x439`) bit 0 flickers on for single frames outside battle (party menu, PC). The tracker only reads bit 1.
+
+### Detecting status KOs
+
+**Rule:** an hp drop to 0 while `gBattlescriptCurrInstr` is in `[0x0833ac40, 0x0833ac61)` (this frame or the previous one) is a status KO: `killedBy: "status"`.
+
+**Why the script pointer is a suitable signal**
+
+- It says where the game is in its battle logic. The game changes hp by running battle script commands, and poison / burn damage have their own script, whose `datahpupdate` is the only command in it that changes hp. An hp drop to 0 with the pointer there came from that command; it is not a guess from side effects.
+- The other candidates can't do this. `gBattlerAttacker` is set to the damaged mon itself in that script (observed), which is also what recoil looks like. `status1` only says the mon has a status, and a poisoned mon can be killed by an attack.
+- An attack faint happens in the attack's script, earlier in the turn than the end-of-turn damage, so the pointer is outside the range. A mon killed by an attack never reaches the damage step.
+- The pointer is still an inference: the game has no "killed by status" flag. It rests on the script layout below and on the ROM version (`gen3.verify` checks the two `printstring` commands).
+
+**Script layout** (ROM bytes at `0x0833ac40..0x0833ac90`; command names are vanilla's, matched by opcode and operand sizes):
+
+| Address | Command / script | Seen on screen |
+|---------|------------------|----------------|
+| `0x0833ac40` | `BattleScript_PoisonTurnDmg`: `printstring HURTBYPOISON` | "hurt by poison!" |
+| `0x0833ac43` | `waitmessage` | the text stays up (~160 frames) |
+| `0x0833ac46` | shared tail `BattleScript_DoStatusTurnDmg`: `statusanimation` | the status flash |
+| `0x0833ac48` | `orword gHitMarker` | nothing |
+| `0x0833ac51` | `healthbarupdate` | the hp bar moves |
+| `0x0833ac53` | `datahpupdate` | nothing; hp is written |
+| `0x0833ac55` | `tryfaintmon` | the faint |
+| `0x0833ac5c`, `0x0833ac61` | a 5-byte jump to `0x0833ac61` (vanilla: `checkteamslost`; only its size and target were checked), then `end2` | the script ends and the pointer stays on `0x0833ac61` (outside the range) |
+| `0x0833ac7a` | `BattleScript_BurnTurnDmg`: `printstring HURTBYBURN`, `waitmessage`, `goto 0x0833ac46` | "hurt by its burn!" |
+
+Poison and toxic enter at `0x0833ac40` and fall into the tail; burn enters at `0x0833ac7a` and jumps into it. From `0x0833ac46` on the three are the same, so the pointer can't say which status it was; `status1` (`+0x50`: `0x08` poison, `0x80` toxic, `0x10` burn) still says so after the faint.
+
+**Observed in mGBA** (your mon, wild Pidgey / Poochyena): every pointer change was logged each frame.
+
+| Status | `status1` | hp | Pointer when hp was written | `gBattlerAttacker` / `gBattlerTarget` |
+|--------|-----------|----|-----------------------------|---------------------------------------|
+| burn | `0x10` | 1 → 0 | `0x0833ac55`, after entering at `0x0833ac7a` | 0 / 0 |
+| toxic | `0x380` → `0x480` → `0x580` | 5 → 1, then 1 → 0 | `0x0833ac55`, entered at `0x0833ac40` | 0 / 0 |
+| poison | `0x08` | 1 → 0 | `0x0833ac55`, entered at `0x0833ac40` | 0 / 0 |
+
+An attack's hp drop was seen with the pointer at `0x08336fa5` (outside the range).
+
+**Not covered**
+
+- Other end-of-turn damage has its own scripts and is not detected: leech seed, curse and weather (the script at `0x0833ac62` has its own copy of the tail), and hazards.
+- An enemy mon dying from status (a `kill`) and doubles were not seen live; they use the same code (tests only).
+- A statused mon killed by an attack was not run on purpose, live or in a test; it follows from the points above.
 
 ## Not found yet
 

@@ -214,6 +214,13 @@ function G.verify(mem)
   for _, c in ipairs(checks) do
     if c[2] ~= c[3] then return false, string.format("%s is %q, expected %q", c[1], c[2], c[3]) end
   end
+  -- the poison turn-damage script starts with `printstring STRINGID_HURTBYPOISON` (0x10, 0x2a, 0x00), the burn one
+  -- (0x0833ac7a) with `printstring STRINGID_HURTBYBURN` (0x10, 0x30, 0x00)
+  local function printstring(a, id) return mem:read8(a) == 0x10 and mem:read8(a + 1) == id and mem:read8(a + 2) == 0 end
+  local lo = A.status_dmg_script[1]
+  if not (printstring(lo, 0x2a) and printstring(lo + 0x3a, 0x30)) then
+    return false, "the poison / burn battle script is not where expected"
+  end
   return true
 end
 

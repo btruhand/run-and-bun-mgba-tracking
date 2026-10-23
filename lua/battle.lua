@@ -1,12 +1,13 @@
 -- Battle tracker. Call step() every frame; it emits events through emit(event):
 --   kill   {pid, split, trainer, key, enemy, killedBy?, fallback?, ambiguous?}   an enemy mon in a trainer battle fainted
---          killedBy: what killed it: "attack" (one of yours), "friendly fire" (the enemy's other battler), "self inflicted"
---          (its own: recoil, Explosion); hazard / weather / status are not detected yet
+--          killedBy: what killed it: "status" (poison / burn damage at the end of the turn), "attack" (one of yours),
+--          "friendly fire" (the enemy's other battler), "self inflicted" (its own: recoil, Explosion); hazard / weather
+--          are not detected yet
 --          fallback: how the credit was picked when it wasn't your attacker ("leftmost"); ambiguous: a fallback with both
 --          of yours alive. The two are independent: a fallback kill can carry a killedBy of its own
 --   death  {pid, killedBy?}                                one of your mons fainted (committed when the battle ends)
---          killedBy: "attack" (an enemy's), "friendly fire" (your other battler's), "self inflicted" (its own: recoil,
---          Explosion); left out when not known
+--          killedBy: "status" (poison / burn), "attack" (an enemy's), "friendly fire" (your other battler's), "self
+--          inflicted" (its own: recoil, Explosion); left out when not known
 --   split  {badges}                                        a gym leader was beaten (leaders defeated, 0..8)
 -- `mem` is anything with read8/read16/read32/readRange (mGBA's emu, or a fake in tests).
 -- Event ids, run and play time are added by the caller.
@@ -16,6 +17,9 @@
 --    identity (species, level, max hp, personality, ot id) is unchanged since the previous frame.
 --  * gTrainerBattleOpponent_A keeps the last trainer after a battle, so "trainer battle" comes from
 --    gBattleTypeFlags (bit 3), not from the opponent id.
+-- And one from a burn faint: at the end of the turn the game sets gBattlerAttacker to the burned battler itself, which
+-- is what recoil looks like too. What tells them apart is where the battle script is (gBattlescriptCurrInstr): inside
+-- the poison / burn damage script when hp reaches 0.
 
 local A = require("addresses")
 local G = require("gen3")
@@ -38,6 +42,13 @@ end
 function B:reset()
   self.active = false
   self.snap, self.killed, self.fainted, self.faint_order = nil, nil, nil, nil
+  self.status_dmg, self.in_script = nil, nil
+end
+
+-- True while the battle script is the end-of-turn poison / burn damage (message to faint check).
+function B:in_status_dmg_script()
+  local ptr = self.mem:read32(A.battlescript_ptr)
+  return ptr >= A.status_dmg_script[1] and ptr < A.status_dmg_script[2]
 end
 
 function B:start()
@@ -49,7 +60,7 @@ function B:start()
   self.opponent = mem:read16(A.opponent_a)
   self.leaders = G.leaders_defeated(mem)
   self.killed, self.fainted, self.faint_order = {}, {}, {}
-  self.snap = {}
+  self.snap, self.status_dmg, self.in_script = {}, false, false
   for b = 0, 3 do self.snap[b] = G.battle_mon(mem, b) end
   self.log(string.format("battle start: flags=%08x %s%s", flags,
     self.trainer and string.format("trainer %d (%s)", self.opponent, G.trainer_name(mem, self.opponent)) or "wild",
@@ -66,10 +77,12 @@ function B:enemy_slot(mon)
 end
 
 -- What killed the enemy battler b (the event's `killedBy`), or nil when not known, and your battler it was an attack
--- of. gBattlerAttacker is one of yours (battler 0 in singles, 0 or 2 in doubles): "attack"; b itself: "self inflicted"
+-- of. In the poison / burn damage script (`status`) it is "status", whatever gBattlerAttacker says. Otherwise
+-- gBattlerAttacker is one of yours (battler 0 in singles, 0 or 2 in doubles): "attack"; b itself: "self inflicted"
 -- (recoil, Explosion); the enemy's other battler: "friendly fire". The byte keeps its last value, so a hazard / weather
--- / status KO can read as one of these until a turn-phase signal tells them apart.
+-- KO can read as one of these until those are detected too.
 function B:killed_by(b)
+  if self.status_dmg then return "status" end
   local attacker = self.mem:read8(A.battler_attacker)
   for _, mine in ipairs(self.double and { 0, 2 } or { 0 }) do
     if attacker == mine then return "attack", mine end
@@ -116,9 +129,10 @@ function B:on_enemy_ko(b, mon)
 end
 
 -- What killed your battler b: an enemy battler's attack, your other battler's (friendly fire, doubles) or its own
--- (self inflicted: recoil, Explosion, Life Orb). Nil when not known. The same caveat as for kills: the byte keeps its
--- last value after a hazard / weather / status faint.
+-- (self inflicted: recoil, Explosion, Life Orb), or poison / burn damage (status). Nil when not known. The same caveat
+-- as for kills: the byte keeps its last value after a hazard / weather faint.
 function B:player_killed_by(b)
+  if self.status_dmg then return "status" end
   local attacker = self.mem:read8(A.battler_attacker)
   if attacker % 2 == 1 then return "attack" end
   if attacker == b then return "self inflicted" end
@@ -135,6 +149,11 @@ end
 
 function B:scan()
   local mem = self.mem
+  -- The faint is seen on the frame the hp is written, with the script just past `datahpupdate`; the previous frame
+  -- counts too in case a frame was skipped
+  local in_script = self:in_status_dmg_script()
+  self.status_dmg = in_script or self.in_script
+  self.in_script = in_script
   local now = {}
   for b = 0, 3 do now[b] = G.battle_mon(mem, b) end
   for b = 0, (self.double and 3 or 1) do
@@ -161,6 +180,7 @@ function B:finish()
   if leaders > self.leaders then self.emit({ type = "split", badges = leaders }) end
   self.log(string.format("battle end: %d fainted, leaders %d -> %d", #self.faint_order, self.leaders, leaders))
   self.snap, self.killed, self.fainted, self.faint_order = nil, nil, nil, nil
+  self.status_dmg, self.in_script = nil, nil
 end
 
 function B:step()

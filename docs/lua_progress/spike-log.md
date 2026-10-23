@@ -66,7 +66,29 @@ f267407  0x02023594 -> 0   0x02023595 -> 1   Luxray hits Simipour (PP drops f267
 
 It also read right on later turns (a switch, Fake Tears, two more attacks). The neighbours match the vanilla order (`gBattlerTarget` next). The new credit then ran against a live KO: with Luxray (battler 0) and Salazzle (battler 2) both alive, the attacker byte was 2 from f304546 and the KO of Masquerain at f304737 was credited to Salazzle, no `ambiguous`. The old rule would have credited Luxray.
 
-Not observed live: a KO by something other than an attack (poison, weather, recoil), where the byte keeps its last value.
+Not observed live: a KO by weather, hazards or recoil, where the byte keeps its last value. A burn KO was observed, see below.
+
+## Status KO evidence (burn)
+
+Setup: a wild Pidgey (L3, full hp) against your burned Pidgey (L5, 4/19). A watcher scanned `0x02023000..0x02024000` every frame and logged each ROM pointer (`0x08xxxxxx`) that moved, plus changes in `gBattlerAttacker`'s neighbours and in the four `gBattleMons` entries. Sand Attack was used on the first turn. The one word that moved every few frames, always inside `0x0833xxxx`, is `gBattlescriptCurrInstr` at `0x0202359c`. After the enemy's attack (hp 4 → 1 inside the attack script around `0x08336fa5`):
+
+```
+f161151  0x02023595 (target) 0 -> 1
+f161154  0x02023594 (attacker) 1 -> 0, target 1 -> 0   script 0x08336fbe -> 0x0833ac7a   burn damage starts; attacker and target are the burned mon
+f161155  script -> 0x0833ac7d, then 0x0833ac80, then 0x0833ac46 (goto), 0x0833ac48, 0x0833ac51, 0x0833ac53
+f161375  hp 1 -> 0                                     script 0x0833ac53 -> 0x0833ac55 (datahpupdate just ran)
+f161376  script -> 0x08339926                          tryfaintmon
+```
+
+So `gBattlerAttacker` was battler 0 (the victim) for the burn faint, which the old rule read as `self inflicted`. The ROM bytes at `0x0833ac40..0x0833ac90` (read from the `.gba`) have vanilla's layout: `10 2a 00` printstring id 0x2a (poison), waitmessage, the tail (`64 01` statusanimation, `35 ... ` orword gHitMarker, `0b 01`, `0c 01`, `19 01 ...`), `3e` end2 at `0x0833ac61`, and `10 30 00` printstring id 0x30 (burn) at `0x0833ac7a` with `28 46ac3308` (goto `0x0833ac46`).
+
+The repo's `battle.lua` then ran against the live game on a reload of the same state (the watcher fed it the frame's `mem`): the first replay was a different turn (Gust killed the mon, no event since the battle was abandoned), the second repeated the sequence (attack to 1 hp, then burn) and the battle's end emitted `death killedBy=status`. Replays differ because the RNG does. Savestate `fixtures/private/r4-wild-pidgey-burned-4hp-menu.ss` is the start. A kill of an enemy by burn or poison was not seen live; it shares the tail.
+
+Toxic, same method (wild Poochyena L3 vs your Pidgey 5/19 with `status1 = 0x380`, Sand Attack each turn, `battle.lua` running live): turn 1 ended with `f249231 hp 5 -> 1  status1=0x480  ptr=0x0833ac55 attacker=0 target=0`, turn 2 with `f251105 hp 1 -> 0  status1=0x580  ptr=0x0833ac55 attacker=0 target=0`, and the battle's end emitted `death killedBy=status`. The counter went 3 → 4 → 5 and the damage 4 then 1 (capped at the remaining hp). Start state: `fixtures/private/r4-wild-pidgey-toxic-5hp-menu.ss`.
+
+Regular poison, same method (wild Poochyena vs your Pidgey 1/19 with `status1 = 0x08`, Sand Attack): `f270751 hp 1 -> 0  status1=0x08  ptr=0x0833ac55 attacker=0 target=0`, then `death killedBy=status` at the battle's end. Start state: `fixtures/private/r4-wild-pidgey-poison-1hp-menu.ss`.
+
+Entry path, both setups replayed with a watcher logging every change of `0x0202359c`, `gBattlerAttacker` and battler 0's hp. Poison: `f282117 0x0833ac40`, `ac43`, `ac46` (f282282), `ac48`, `ac51`, `ac53`, `f282361 ac55 hp 1 -> 0`. Toxic: `f283893 0x0833ac40`, `ac43`, `ac46` (f284058), `ac48`, `ac51`, `ac53`, `f284145 ac55 hp 5 -> 1`, then `ac5c`, then `ac61` (`end2`) where it rested until the next action. The same addresses in the same order, and `gBattlerAttacker` was 0 from `ac40` on. Burn enters at `0x0833ac7a` instead and joins at `ac46`.
 
 ## Catch and evolution evidence
 

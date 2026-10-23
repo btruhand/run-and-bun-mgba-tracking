@@ -15,6 +15,10 @@ function F.new()
   f:write32(A.sb2_ptr, f.sb2)
   f:write32(A.storage_ptr, f.storage)
   f:write32(f.sb2 + A.sb2_trainer_id, 0xF9D040AF) -- the OT id the mon helpers default to
+  -- the poison / burn damage scripts, which gen3.verify looks for: `printstring STRINGID_HURTBYPOISON` and `..._HURTBYBURN`
+  local lo = A.status_dmg_script[1]
+  for i, b in ipairs({ 0x10, 0x2a, 0x00 }) do f:write8(lo + i - 1, b) end
+  for i, b in ipairs({ 0x10, 0x30, 0x00 }) do f:write8(lo + 0x3a + i - 1, b) end
   return f
 end
 
@@ -124,6 +128,7 @@ function F:in_battle(on) self:write8(A.in_battle, on and 0x02 or 0x00) end
 function F:battle_type(flags) self:write32(A.battle_type, flags) end
 function F:opponent(id) self:write16(A.opponent_a, id) end
 function F:attacker(b) self:write8(A.battler_attacker, b) end
+function F:battlescript(ptr) self:write32(A.battlescript_ptr, ptr) end
 function F:outcome(v) self:write8(A.battle_outcome, v) end
 
 function F:battle_mon(b, m)
