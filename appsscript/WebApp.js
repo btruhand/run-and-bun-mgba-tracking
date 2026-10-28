@@ -543,9 +543,9 @@ function reconcile_(ctx, sync) {
 
   // 4. Sync what the game stores directly: species / nickname / location, missing mons, badges
   var sheet = ctx.sheet;
-  Object.keys(present).forEach(function(pid) {
-    guard_(ctx, 'sync could not update ' + pid, present[pid], function() { syncMon_(ctx, sync, pid, present[pid]); });
-  });
+  var missing = [];
+  guard_(ctx, 'sync could not update the mons on the sheet', null, function() { missing = syncKnownMons_(ctx, present); });
+  guard_(ctx, 'sync could not add the mons missing from the sheet', null, function() { addMissingMons_(ctx, sync, present, missing); });
 
   if (sync.complete) {
     guard_(ctx, 'sync could not check for mons missing from the game', null, function() {
@@ -573,31 +573,115 @@ function forEntry_(ctx, en, what, fn) {
   if (rows.length) guard_(ctx, 'could not reference issues from ' + JOURNAL, null, function() { addIssueRefs_(ctx, en.rowNum, rows); });
 }
 
-// Adds a mon from a sync that isn't on the sheet, or brings its species and nickname in line with the game.
-function syncMon_(ctx, sync, pid, m) {
+// Brings the species and nickname of the sheet's mons in line with the game, reading each column once and writing it
+// back once, and only if something changed. If the sheet rejects that write (an unknown species fails the dropdown's
+// validation), the changes are made one mon at a time instead, so only the mon with the bad value fails. Returns the
+// pids that are in the game but not on the sheet.
+function syncKnownMons_(ctx, present) {
   var sheet = ctx.sheet;
-  var row = findRowById(sheet, pid);
-  if (!row) {
+  var n = rowCount_();
+  var ids = sheet.getRange(FIRST_ROW, COL.ID, n, 1).getValues();
+  var species = sheet.getRange(FIRST_ROW, COL.SPECIES, n, 1).getValues();
+  var nicks = sheet.getRange(FIRST_ROW, COL.NICK, n, 1).getValues();
+  var onSheet = {};
+  var changes = []; // {pid, row, species, nick}, each undefined if it is already right
+  var speciesChanged = false, nickChanged = false;
+  for (var i = 0; i < n; i++) {
+    var pid = ids[i][0];
+    var m = present[pid];
+    if (pid === '' || !m || onSheet[pid]) continue; // the first row with an id is the mon's, as for findRowById
+    onSheet[pid] = true;
+    var change = {pid: pid, row: FIRST_ROW + i};
+    if (m.species && species[i][0] !== m.species) {
+      change.species = species[i][0] = m.species;
+      speciesChanged = true;
+    }
+    if (m.nick !== undefined && nicks[i][0] !== m.nick) {
+      change.nick = nicks[i][0] = m.nick;
+      nickChanged = true;
+    }
+    if (change.species !== undefined || change.nick !== undefined) changes.push(change);
+  }
+
+  if (changes.length) {
+    ctx.mutated = true;
+    try {
+      if (speciesChanged) sheet.getRange(FIRST_ROW, COL.SPECIES, n, 1).setValues(species);
+      if (nickChanged) sheet.getRange(FIRST_ROW, COL.NICK, n, 1).setValues(nicks);
+      SpreadsheetApp.flush();
+    } catch (err) {
+      changes.forEach(function(c) {
+        guard_(ctx, 'sync could not update ' + c.pid, present[c.pid], function() {
+          if (c.species !== undefined) sheet.getRange(c.row, COL.SPECIES).setValue(c.species);
+          if (c.nick !== undefined) sheet.getRange(c.row, COL.NICK).setValue(c.nick);
+        });
+      });
+    }
+  }
+  return Object.keys(present).filter(function(pid) { return !onSheet[pid]; });
+}
+
+// Adds the mons from a sync that aren't on the sheet, as catches (source "reconcile"). Their rows are written in runs
+// of adjacent empty rows, one write per column block, and their _Events rows in one write. A mon with no empty row
+// left is recorded as ignored.
+function addMissingMons_(ctx, sync, present, pids) {
+  if (!pids.length) return;
+  var sheet = ctx.sheet;
+  var n = rowCount_();
+  var loc = sheet.getRange(FIRST_ROW, COL.LOCATION, n, 1).getValues();
+  var species = sheet.getRange(FIRST_ROW, COL.SPECIES, n, 1).getValues();
+  var ids = sheet.getRange(FIRST_ROW, COL.ID, n, 1).getValues();
+  var empty = [];
+  for (var i = 0; i < n; i++) {
+    if (loc[i][0] === '' && species[i][0] === '' && ids[i][0] === '') empty.push(FIRST_ROW + i);
+  }
+
+  var now = Date.now();
+  var placed = []; // {row, ev}
+  var full = [];
+  pids.forEach(function(pid, k) {
+    var m = present[pid];
     var synth = {
-      id: 'reconcile:' + sync.run + ':' + pid + ':' + Date.now(),
+      id: 'reconcile:' + sync.run + ':' + pid + ':' + now,
       run: sync.run, playTime: sync.playTime, type: 'catch', pid: pid,
       species: m.species, nick: m.nick || '', location: m.location || '', source: 'reconcile'
     };
+    if (k < empty.length) placed.push({row: empty[k], ev: synth});
+    else full.push(synth);
+  });
+
+  // Runs of consecutive rows: STATUS, then NICK..TOTAL (nickname, species, location, the nine KCs, total), then ID.
+  var zeros = [];
+  for (var z = 0; z < SPLIT_COUNT + 1; z++) zeros.push(0);
+  for (var start = 0; start < placed.length;) {
+    var end = start + 1;
+    while (end < placed.length && placed[end].row === placed[end - 1].row + 1) end++;
+    var run = placed.slice(start, end);
+    sheet.getRange(run[0].row, COL.STATUS, run.length, 1).setValues(run.map(function() { return ['Alive']; }));
+    sheet.getRange(run[0].row, COL.NICK, run.length, COL.TOTAL - COL.NICK + 1).setValues(run.map(function(p) {
+      return [p.ev.nick, p.ev.species, p.ev.location].concat(zeros);
+    }));
+    sheet.getRange(run[0].row, COL.ID, run.length, 1).setValues(run.map(function(p) { return [p.ev.pid]; }));
+    start = end;
+  }
+  if (placed.length) ctx.mutated = true;
+
+  if (placed.length) {
+    var known = knownIds_(ctx);
+    var first = ctx.journal.getLastRow() + 1;
+    ctx.journal.getRange(first, 1, placed.length, JOURNAL_HEADERS.length).setValues(placed.map(function(p) {
+      var e = p.ev;
+      return [e.id, e.run, e.playTime === undefined ? '' : e.playTime, e.type, e.pid, journalPayload_(e), true,
+        JSON.stringify({op: 'removeMon', pid: e.pid}), new Date(), 'applied', ''];
+    }));
+    placed.forEach(function(p, k) { known[p.ev.id] = {row: first + k, status: 'applied'}; });
+  }
+
+  full.forEach(function(synth) {
     var before = ctx.issueRows.length;
-    var res = applyForward_(ctx, synth);
-    SpreadsheetApp.flush();
-    if (res.error) logIssue_(ctx, res.error, synth);
-    appendJournal_(ctx, synth, res.error ? 'ignored' : 'applied', res.inverse, ctx.issueRows.slice(before));
-    return;
-  }
-  if (m.species && sheet.getRange(row, COL.SPECIES).getValue() !== m.species) {
-    sheet.getRange(row, COL.SPECIES).setValue(m.species);
-    ctx.mutated = true;
-  }
-  if (m.nick !== undefined && sheet.getRange(row, COL.NICK).getValue() !== m.nick) {
-    sheet.getRange(row, COL.NICK).setValue(m.nick);
-    ctx.mutated = true;
-  }
+    logIssue_(ctx, 'Rankings table is full', synth);
+    appendJournal_(ctx, synth, 'ignored', undefined, ctx.issueRows.slice(before));
+  });
 }
 
 function arrivalHolds_(en, sync, present) {

@@ -177,6 +177,23 @@ const scenarios = {
     assert.deepEqual(s.rows.map((r) => r.id).sort(), [A, '0xB2:0xF9D040AF', '0xC2:0xF9D040AF'].sort(), 'old Gligar gone, both new ones added');
     assert.equal(byId(s, '0xC2:0xF9D040AF').location, 'Verdanturf Town');
   },
+  async 'sync with several mons to add and update writes them all, with a journal row each'() {
+    await send(catchEv(10, A, 'Piplup'), catchEv(20, B, 'Zigzagoon'));
+    const extra = ['0xD:1', '0xE:1', '0xF:1'];
+    await send(sync(50, [
+      mon(A, 'Empoleon', { nick: 'Pip' }),
+      mon(B, 'Linoone'),
+      ...extra.map((id, i) => mon(id, 'Ralts', { nick: `R${i}`, location: `Route 10${i}` })),
+    ], { defeated: [], badges: 0, complete: true }));
+    const s = await dump();
+    assert.deepEqual([byId(s, A).species, byId(s, A).nick, byId(s, B).species], ['Empoleon', 'Pip', 'Linoone']);
+    extra.forEach((id, i) => {
+      const r = byId(s, id);
+      assert.deepEqual([r.species, r.nick, r.location, r.status, r.total], ['Ralts', `R${i}`, `Route 10${i}`, 'Alive', 0]);
+    });
+    assert.equal(s.rows.length, 5);
+    assert.equal(s.journal.filter((j) => j.id.startsWith('reconcile:') && j.active).length, 3);
+  },
   async 'events from a different run are held'() {
     await send(catchEv(10, A, 'Piplup'));
     const saved = RUN; RUN = 'other';
@@ -224,7 +241,7 @@ const scenarios = {
   // These two rely on the Species column's dropdown rejecting what isn't on its list, as it does on the template.
   async 'an event that throws is logged to _Issues and the rest of the request still applies'() {
     await send(catchEv(10, A, 'Sizzlipede'));
-    const results = await send(ev('evolve', 20, { pid: A, from: 'Sizzlipede', to: 'Centskorch' }), killEv(21, A, 1, 't1'));
+    const results = await send(ev('evolve', 20, { pid: A, from: 'Sizzlipede', to: 'Venonat' }), killEv(21, A, 1, 't1'));
     assert.deepEqual(results.map((r) => r.status), ['failed', 'applied']);
     assert.match(results[0].reason, /violates the data validation rules/);
     const s = await dump();
@@ -236,7 +253,7 @@ const scenarios = {
   },
   async 'a sync step that throws is logged and the rest of the sync still applies'() {
     await send(catchEv(10, A, 'Sizzlipede'), catchEv(11, B, 'Zigzagoon'));
-    const results = await send(sync(100, [mon(A, 'Centskorch'), mon(B, 'Linoone', { nick: 'Zoomer' })], { badges: 2 }));
+    const results = await send(sync(100, [mon(A, 'Venonat'), mon(B, 'Linoone', { nick: 'Zoomer' })], { badges: 2 }));
     assert.deepEqual(results.map((r) => r.status), ['reconciled']);
     const s = await dump();
     assert.equal(byId(s, A).species, 'Sizzlipede');
@@ -264,7 +281,7 @@ const scenarios = {
   async 'a resent event that was not applied is handled again in its own row; an applied one is a duplicate'() {
     await send(catchEv(10, A, 'Sizzlipede'));
     const kill = killEv(20, B, 1, 't1'); // its mon's catch hasn't arrived yet
-    const evolve = ev('evolve', 30, { pid: A, from: 'Sizzlipede', to: 'Centskorch' }); // the dropdown rejects it
+    const evolve = ev('evolve', 30, { pid: A, from: 'Sizzlipede', to: 'Venonat' }); // the dropdown rejects it
     assert.deepEqual((await send(kill, evolve)).map((r) => r.status), ['ignored', 'failed']);
     await send(catchEv(15, B, 'Zigzagoon'));
     assert.deepEqual((await send(kill, evolve)).map((r) => r.status), ['applied', 'failed']);

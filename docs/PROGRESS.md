@@ -78,6 +78,7 @@ Tested on the **dev copy**; the web app is also deployed to the real sheet.
 - [x] Events: `catch`, `kill`, `death`, `evolve`, `trade`, `split`, `sync`
 - [x] Journal in hidden `_Events`, issues in `_Issues`
 - [x] `sync` reconcile: rewind, forward jump, killer re-attribution, adds missing mons
+- [~] `sync` writes species, nicknames and missing mons in bulk (a column or block per write, not a call per mon), falling back to one mon at a time if the sheet rejects the write. Seen working on the dev sheet by eye; the sheet scenarios were not re-run after the fallback and the `Venonat` change
 - [x] Undo latest tracking change button
 - [x] Dev-only `dump` / `reset` / `undo` actions (refuse unless `ENV=dev`)
 - [-] Event for a mon that vanishes from party and boxes (`missing`): not needed, `sync` covers it
