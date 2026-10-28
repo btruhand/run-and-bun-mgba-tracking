@@ -728,6 +728,23 @@ test("a new party mon with another OT id (an in-game trade) is logged once, not 
   eq(n, 1, "logged once")
 end)
 
+test("a temporary mon with your OT id written over an occupied party slot is not a catch", function()
+  -- observed in Wally's catching tutorial: Zigzagoon over slot 0 for the whole scene, the lead back when it ends
+  local w = mworld({ party = TEAM })
+  w.mem:species_name(987, "Zigzagoon")
+  w.mem:map_name(7, "Petalburg City")
+  w.scans(2)
+  -- the real lead is stashed and slot 0 holds a Zigzagoon (your OT, met in Petalburg) for the whole scene, party count unchanged
+  w.mem:party_mon(0, { personality = 0x32D20384, species = 987, nick = "Zigzagoon", met_location = 7 })
+  w.scans(6)
+  eq(#w.events, 0, "events during the scene")
+  eq(w.logged("temporary"), true, "logged")
+  eq(w.logged("now holds Zigzagoon %(0x32D20384:0xF9D040AF%), a temporary mon that took the place of Chimchar %(0x2EEA2110:0xF9D040AF%)"), true, "logged with names")
+  w.mem:party_mon(0, TEAM[1]) -- the game puts your lead back
+  w.scans(4)
+  eq(#w.events, 0, "events after the scene")
+end)
+
 test("an egg is not sent until it hatches", function()
   local w = mworld({ party = { TEAM[1] } })
   w.scans(1)

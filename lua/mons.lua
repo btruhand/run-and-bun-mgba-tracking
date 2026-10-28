@@ -11,6 +11,8 @@
 --  * Outside battle, a party scan every SCAN_EVERY frames: a mon not seen before, with your OT id, read the same
 --    with a valid checksum on two scans in a row. This is the starter (given by script before the first battle).
 --    In-game trades also land in the party, but with another OT id; they are logged and left for the trade code.
+--    A mon that appears in a slot another mon was in, with that mon gone from the party, is not a catch: a script can
+--    overwrite a slot with a temporary mon that has your OT id (see mark_temporary).
 --
 -- Evolutions come from the same party scan: a known mon whose species differs from its last valid read, with the
 -- new species read the same with a valid checksum on two scans in a row. Mons only evolve in the party (after a
@@ -50,6 +52,8 @@ function M:reset(settle)
   self.known = nil      -- pid -> {species, nick} from the last valid read (empty until one), mons that need no
                         -- catch event; nil until seeded
   self.foreign = {}     -- pid -> true, mons with another OT id already logged
+  self.temporary = {}   -- pid -> true, mons that took the slot of a mon that left the party
+  self.slots = nil      -- pid of each party slot at the last scan (nil for an empty slot), 0..5
   self.species = {}     -- species id -> true, for the repeated-species note
   self.pending = {}     -- pid -> species, new party mons waiting for a second matching scan
   self.evolving = {}    -- pid -> species, known party mons with a new species waiting for a second matching scan
@@ -165,12 +169,49 @@ function M:check_species(k, m)
   k.species, k.nick = m.species, m.nick
 end
 
+-- A script can put a temporary mon into an occupied party slot, count unchanged, and put the real one back later. The
+-- temporary mon has your OT id and OT name, so nothing in the mon says it is not yours. What gives it away is how it
+-- arrives. A mon of yours only enters the party by being appended (a catch, a withdraw) or at the start (the starter,
+-- count 0), never into a slot that held another mon which has left the party. So a new pid in a slot whose previous
+-- pid is gone from the party is temporary, whatever its checksum reads.
+-- Example (observed): Wally's catching tutorial overwrites slot 0 with a Zigzagoon for the whole scene
+-- (docs/MEMORY_MAP.md).
+-- "Zigzagoon (pid)" for the log; the pid alone when the species is not known (a mon read mid-rewrite, or never read).
+function M:label(pid, species)
+  if not species then return pid end
+  return string.format("%s (%s)", G.species_name(self.mem, species), pid)
+end
+
+function M:mark_temporary()
+  local mem = self.mem
+  local slots, here = {}, {}
+  for i = 0, 5 do
+    local a = A.party + i * A.mon_size
+    local pid, ot = mem:read32(a), mem:read32(a + 4)
+    if pid ~= 0 or ot ~= 0 then
+      slots[i] = G.pid_string(pid, ot)
+      here[slots[i]] = true
+    end
+  end
+  for i = 0, 5 do
+    local prev, now = self.slots and self.slots[i], slots[i]
+    if prev and now and prev ~= now and not here[prev] and not self.known[now] and not self.temporary[now] then
+      self.temporary[now] = true
+      local m, k = G.read_mon(mem, A.party + i * A.mon_size), self.known[prev]
+      self.log(string.format("party slot %d now holds %s, a temporary mon that took the place of %s; not a catch", i,
+        self:label(now, m and m.valid and m.species or nil), self:label(prev, k and k.species)))
+    end
+  end
+  self.slots = slots
+end
+
 function M:scan()
   local mem = self.mem
   if self.lookups then self:look_up() end -- first, so a caught mon found here is known before the party loop
   local raw = mem:readRange(A.party, 6 * A.mon_size)
   if raw == self.last_party and next(self.pending) == nil and next(self.evolving) == nil then return end
   self.last_party = raw
+  self:mark_temporary()
   local here = {}
   for i = 0, 5 do
     local m = G.read_mon(mem, A.party + i * A.mon_size)
@@ -178,7 +219,7 @@ function M:scan()
     local k = m and self.known[m.pid]
     if k then
       if m.valid and not m.egg then self:check_species(k, m) end
-    elseif m and not self.foreign[m.pid] then
+    elseif m and not self.foreign[m.pid] and not self.temporary[m.pid] then
       if m.valid and not m.egg then
         if self.pending[m.pid] ~= m.species then
           self.pending[m.pid] = m.species -- first sighting (or it changed): wait for the next scan

@@ -52,6 +52,7 @@ Details: [MEMORY_MAP.md](MEMORY_MAP.md), method in [lua_progress/spike-log.md](l
   - [x] Doubles: credited to `gBattlerAttacker` when it is one of yours (live); otherwise leftmost live mon, `ambiguous` flagged (tests only)
   - [ ] Blackout (whole party wiped) in a wild fight, not seen live
 - [x] **Catches** (`mons.lua`): from the battle outcome, from the party or boxes, and the starter outside battle (live, including a catch with a full party that goes to a box)
+  - [x] A temporary mon with your OT id written over an occupied party slot (Wally's catching tutorial puts a Zigzagoon in slot 0 for the whole scene) is not a catch; its arrival is seen live, the tracker fix is tests only
 - [x] **Evolutions** (`mons.lua`): `evolve {pid, from, to, nick?}` (live). A level-up evolution right after a battle is skipped on purpose; runs level with the Endless Candy, so it rarely happens
 - [ ] **Trades**: tracked id replaced by an unknown id with a different OT in the same slot. In Run & Bun gift mons come from NPC trades, so they always land in the party. To check on a real trade: the met location (vanilla uses 254, "in-game trade", which the map table doesn't cover) and the slot transition on the trade screen
 - [x] **`sync` snapshot** (`sync.lua`): `syncToTracker()` from the scripting console sends every mon, defeated trainers, badges and play time. Manual only, by choice (never sent on a load)
