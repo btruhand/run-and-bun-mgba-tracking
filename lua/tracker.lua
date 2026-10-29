@@ -37,13 +37,22 @@ TRACKER_RELAY = relay
 TRACKER_SESSION = TRACKER_SESSION or string.format("%x", os.time())
 TRACKER_SEQ = TRACKER_SEQ or 0
 
+-- stopTracking() sets this and restartTracking() clears it: events are still seen (and logged) but not sent. Loading
+-- the script again clears it too.
+local stopped = false
+
 local function emit(ev)
   ev.run = G.run_id(emu)
   if ev.playTime == nil then ev.playTime = play_time end
   TRACKER_SEQ = TRACKER_SEQ + 1
   ev.id = string.format("%s:%s.%d", tostring(ev.run), TRACKER_SESSION, TRACKER_SEQ)
   local line = J.encode(ev)
-  local sent, why = relay:send(line)
+  local sent, why
+  if stopped then
+    sent, why = false, "tracking stopped"
+  else
+    sent, why = relay:send(line)
+  end
   log("EVENT " .. line .. (sent and "" or "  (not sent: " .. why .. ")"))
   return sent
 end
@@ -69,6 +78,10 @@ end
 -- has drifted from the game: sends what the game has now (every mon, defeated trainers, badges) and the sheet
 -- reconciles its event log against it. Returns true if it was sent.
 function syncToTracker()
+  if stopped then
+    log("sync: not sent (tracking stopped; restartTracking() resumes it)")
+    return false
+  end
   local snapshot, why = Sync.snapshot(emu)
   if not snapshot then
     log("sync: not sent (" .. why .. ")")
@@ -80,6 +93,29 @@ function syncToTracker()
     log(string.format("sync: sent %d mons, %d defeated trainers, %d badges", #snapshot.mons, #snapshot.defeated, snapshot.badges))
   end
   return sent
+end
+
+-- Call from the scripting console (`stopTracking()`) before doing something that shouldn't reach the sheet, such as
+-- catching mons you mean to reset away. Nothing is sent to the relay from then on, even while it is connected, and that
+-- includes `syncToTracker()`. `restartTracking()` (or loading the script again) starts sending again.
+function stopTracking()
+  if stopped then
+    log("tracking: already stopped; restartTracking() resumes it")
+    return
+  end
+  stopped = true
+  log("tracking: stopped; nothing is sent to the sheet until restartTracking()")
+end
+
+-- What happened while stopped is not sent afterwards: the trackers already took it as seen. `syncToTracker()` is how
+-- the sheet catches up with it.
+function restartTracking()
+  if not stopped then
+    log("tracking: already running")
+    return
+  end
+  stopped = false
+  log("tracking: resumed; what happened while stopped was not sent (syncToTracker() brings the sheet up to date)")
 end
 
 if TRACKER_CB then callbacks:remove(TRACKER_CB) end
@@ -100,7 +136,18 @@ local HELP = {
   "  Type it in the input line below to send the sheet everything the game has",
   "  now (every mon, defeated trainers, badges) so it matches the game. Can be used",
   "  to align the sheet if it has drifted somehow, or after loading a savestate or",
-  "  an older save. Ignored if the save isn't the run the sheet is tracking.",
+  "  an older save. Ignored if the save isn't the run the sheet is tracking. Can",
+  "  undo what the sheet has recorded that the game no longer has, like a mon you",
+  "  caught before resetting.",
+  "",
+  "stopTracking()",
+  "  Stops sending anything to the sheet, even while the relay is connected. Use it",
+  "  before something you don't want tracked, like catching mons you plan to reset",
+  "  away. Also blocks syncToTracker().",
+  "",
+  "restartTracking()",
+  "  Sends to the sheet again after stopTracking(). What happened in between is not",
+  "  sent; use syncToTracker() if the sheet should catch up with it.",
   "",
   "How to use (setup and playing):",
   "  https://github.com/btruhand/run-and-bun-mgba-tracking#how-to-use",

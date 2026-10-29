@@ -1240,6 +1240,8 @@ local function tracker_world(opts)
   _G.socket = net
   dofile(root .. "/lua/tracker.lua")
   w.sync = _G.syncToTracker
+  w.stop = _G.stopTracking
+  w.restart = _G.restartTracking
   function w.frames(n) for _ = 1, n or 1 do w.frame() end end
   function w.logged(pattern)
     for _, l in ipairs(w.logs) do if l:find(pattern) then return true end end
@@ -1247,7 +1249,7 @@ local function tracker_world(opts)
   end
   function w.close()
     for k, v in pairs(saved) do _G[k] = v end
-    _G.syncToTracker, _G.TRACKER_HELP, _G.TRACKER_CB, _G.TRACKER_RELAY, _G.TRACKER_SESSION, _G.TRACKER_SEQ = nil, nil, nil, nil, nil
+    _G.syncToTracker, _G.stopTracking, _G.restartTracking, _G.TRACKER_HELP, _G.TRACKER_CB, _G.TRACKER_RELAY, _G.TRACKER_SESSION, _G.TRACKER_SEQ = nil, nil, nil, nil, nil
   end
   w.frames(2) -- the first frame connects to the relay
   return w
@@ -1322,6 +1324,78 @@ test("syncToTracker without a relay reports it was not sent", function()
   end)
 end)
 
+-- A new mon with the player's OT id appearing in the party outside battle is a catch (the starter's path).
+local function new_party_mon(w)
+  w.mem:party_mon(2, { personality = 0x1111AAAA, species = 261, level = 5, hp = 20, max_hp = 20, met_location = 17 })
+  w.frames(300)
+end
+
+test("a catch is sent while tracking, and not after stopTracking(), even with the relay connected", function()
+  with_tracker({}, function(w)
+    new_party_mon(w)
+    eq(#w.sent, 1, "sent while tracking")
+    assert(w.sent[1]:find('"type":"catch"', 1, true), w.sent[1])
+  end)
+  with_tracker({}, function(w)
+    w.stop()
+    assert(w.logged("tracking: stopped"), "log")
+    new_party_mon(w)
+    eq(#w.sent, 0, "nothing sent")
+    assert(w.logged('EVENT {.*"type":"catch".*%(not sent: tracking stopped%)'), "the event is still logged, with why")
+  end)
+end)
+
+test("syncToTracker sends nothing after stopTracking(), and the console says why", function()
+  with_tracker({}, function(w)
+    w.stop()
+    eq(w.sync(), false, "sent")
+    eq(#w.sent, 0, "lines")
+    assert(w.logged("sync: not sent %(tracking stopped"), "log")
+    assert(not w.logged("EVENT"), "the snapshot isn't printed")
+  end)
+end)
+
+test("stopTracking() twice says it is already stopped", function()
+  with_tracker({}, function(w)
+    w.stop()
+    w.stop()
+    assert(w.logged("already stopped"), "log")
+  end)
+end)
+
+test("restartTracking() sends again; what happened while stopped stays unsent, and a sync catches up", function()
+  with_tracker({}, function(w)
+    w.stop()
+    new_party_mon(w)
+    w.restart()
+    assert(w.logged("tracking: resumed"), "log")
+    w.frames(300)
+    eq(#w.sent, 0, "the catch made while stopped is not sent later")
+    eq(w.sync(), true, "sync sent")
+    assert(w.sent[1]:find('"pid":"0x1111AAAA:0xF9D040AF"', 1, true), "the sync has the mon")
+  end)
+end)
+
+test("restartTracking() when tracking was not stopped changes nothing", function()
+  with_tracker({}, function(w)
+    w.restart()
+    assert(w.logged("already running"), "log")
+    eq(w.sync(), true, "still sends")
+  end)
+end)
+
+test("loading the script again starts tracking again after stopTracking()", function()
+  with_tracker({}, function(w)
+    w.stop()
+    dofile(root .. "/lua/tracker.lua")
+    w.frames(2)
+    eq(w.sync(), false, "the old load is still stopped")
+    w.sync = _G.syncToTracker
+    eq(w.sync(), true, "sent after the reload")
+    eq(#w.sent, 1, "lines")
+  end)
+end)
+
 test("loading the script puts the help text in its own buffer, with syncToTracker and the how-to-use link", function()
   with_tracker({}, function(w)
     eq(#w.buffers, 1, "buffers")
@@ -1335,6 +1409,8 @@ test("loading the script puts the help text in its own buffer, with syncToTracke
     end
     text = table.concat(text, "\n")
     assert(text:find("syncToTracker()", 1, true), "syncToTracker")
+    assert(text:find("stopTracking()", 1, true), "stopTracking")
+    assert(text:find("restartTracking()", 1, true), "restartTracking")
     assert(text:find("https://github.com/btruhand/run-and-bun-mgba-tracking#how-to-use", 1, true), "link")
     for y in pairs(b.rows_text) do assert(y >= 0 and y < b.rows, "row outside the buffer: " .. y) end
   end)
