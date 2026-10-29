@@ -49,7 +49,7 @@ You need mGBA 0.10.3 (higher versions probably work but was not tested), the Run
 
 2. With the ROM running in mGBA, load `lua/tracker.lua` (Tools → Scripting → File → Load script). The scripting console shows `relay: connected on port 38765`, and catches, kills, deaths, evolutions and badges now show up on the `Rankings` tab.
 
-The sheet tracks one run (save file) at a time; it locks onto the first one that sends it an event. To start a new run, press Reset Run (`AA9`). See [Relay](#relay) and [Lua tracker](#lua-tracker) for details.
+The sheet tracks one run (save file) at a time; it locks onto the first one that sends it an event. To start a new run, press Reset Run (`AA9`). See [Relay](#relay) and [Lua Tracker](#lua-tracker) for details.
 
 ## Redeploying
 
@@ -90,6 +90,7 @@ appsscript/
   WebApp.js      web app: receives events and applies them to the sheet
   appsscript.json
 lua/
+  README.md      how the tracker detects events, and the sync command in detail
   tracker.lua    mGBA entry point: load this in mGBA
   battle.lua     battle tracker (kill / death / split events)
   mons.lua       mon tracker (catch events, including the starter)
@@ -149,6 +150,20 @@ The table is sorted by Total KC (descending), then Status (Alive above Dead), ov
 `Sorter.js` used to hold everything in one `onEdit`. The row logic now lives in `Rankings.js` (`initRow`, `blankRow`, `recomputeTotal`, `addKc`, `sortRankings`, …) so the manual buttons and the web app behave identically. Behavior changes from the original: the sort range widens from `D3:T102` to `D3:Y102` to carry the ID column, and Reset Run also clears that column and the web app's event log.
 
 Script writes don't trigger `onEdit`, which is why the web app calls the shared helpers itself.
+
+## Lua Tracker
+
+`lua/tracker.lua` runs inside mGBA and watches the game while you play. Catches, kills, deaths, evolutions and badges are sent to the [relay](#relay) and show up on the sheet on their own; load it as described in [How to use](#each-time-you-play).
+
+A few commands are run by hand. Type them in the scripting console's input line (Tools → Scripting). They are also listed in the "Auto-tracker help text" buffer that appears when the script loads.
+
+| command           | what it does                                                                                                                                                                                                                                                                                                                |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `syncToTracker()` | Sends the sheet everything the game has now (your mons, defeated trainers, badges) so the sheet matches it. Use it after loading a savestate or an older save, or when the sheet has drifted from the game. **It can revert events the sheet has recorded**: a mon you caught earlier is removed if the game no longer has it. |
+| `stopTracking()`  | Stops everything from being sent to the relay, even while it is connected (`syncToTracker()` included). Use it before catching mons you plan to reset away. |
+| `restartTracking()` | Starts sending again after `stopTracking()`. What happened in between is not sent; run `syncToTracker()` if the sheet should catch up with it. |
+
+For how the tracker detects events, what each one carries and when a sync is refused, see [lua/README.md](lua/README.md).
 
 ## Web app
 
@@ -233,26 +248,6 @@ npm run test:sheet -- --dump          # also print sheet state after each scenar
 These run against the **dev** web app (`WEB_APP_URL` and `TOKEN` from `.env.dev`) and take around two minutes (each request takes a few seconds). Each scenario resets the dev sheet first and again at the end. They cover catches, kills and sorting, deaths, evolutions, trades, splits, rewinds and forward jumps via `sync`, killer re-attribution, run mismatches, duplicate events, errors in an event or a sync step going to `_Issues` without stopping the rest, every event's `_Events` row with its status and issue reference, and that row formulas (including the `U:W` bar graph) still reference their own row after a sort.
 
 To try a sequence of events by hand, `node .claude/skills/testing-on-dev-sheet/sim.mjs steps.json` resets the dev sheet, plays the steps and prints `Rankings`, `_Events` and `_Issues` (see `.claude/skills/testing-on-dev-sheet/SKILL.md`).
-
-## Lua tracker
-
-Load `lua/tracker.lua` in mGBA 0.10.3 (Tools → Scripting → File → Load script) with Run & Bun 1.0.7 running. It checks the ROM's name tables first and refuses to start on anything else. Each event appears in the scripting console as `EVENT {json}` and is sent to the [relay](#relay) if it is running (otherwise the line ends with `(not sent: relay not connected)`):
-
-| type     | when                                                                                                                                                                                                                                                                                                                                                    |
-| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `kill`   | an enemy mon in a **trainer** battle faints; credited to your mon on the field. `split` is leaders defeated + 1, `trainer` is the opponent's id, `key` is `<trainer>:<enemy party slot>`                                                                                                                                                                |
-| `death`  | one of your mons fainted in a battle (sent when the battle ends)                                                                                                                                                                                                                                                                                        |
-| `split`  | a gym leader was beaten; `badges` is how many of the eight leaders are defeated                                                                                                                                                                                                                                                                         |
-| `catch`  | a mon joined you: a battle ended with the mon caught (it is read from the party or box it was stored in, so the nickname is final), or a new mon with your OT id appeared in the party outside battle (the starter). `species`, `nick`, `location` (met location name)                                                                                  |
-| `evolve` | a known party mon's species changed, read the same with a valid checksum on two party scans (about a second apart). `from`, `to` are species names; `nick` is sent only when the game renamed the mon, which it does when the mon still had its species name (Scatterbug → Spewpa). A change that keeps the species name (a form change) is only logged |
-
-Species names are sent as the sheet's `Sprites` tab spells them (full names where the ROM shortens them, Nidoran-F/-M, Flabebe, form names for Oricorio, Lycanroc and Urshifu); see docs/DESIGN.md "Event schema". Events carry `run` (your trainer id), `playTime` and an `id`, `<run>:<session>.<n>`, unique across script reloads and mGBA restarts; the web app skips ids it has already applied. Kills in doubles use the leftmost live mon and set `ambiguous` when both of yours were alive (the attacker isn't read yet). A jump in play time (loading a savestate or a save) drops the current battle without emitting anything.
-
-Mons already in the party and boxes when the script starts, or after loading a savestate or save, are treated as known and not sent: the sheet may already have them (hand-entered rows have no id), and `sync` will reconcile them. A mon is sent at most once per timeline, and the sheet ignores a catch for an id it already has. Catching a species you already have is sent as a new mon (and logged); evolution lines are not checked.
-
-**Sending a `sync`.** Type `syncToTracker()` in the scripting console (Tools → Scripting, the console's input line) after loading a savestate or an older save, or when the sheet has drifted from the game. It sends the snapshot (every mon in the party and boxes, the defeated trainers, the badge count) and the sheet reconciles its log against it (below); the console says what was sent, or why it wasn't. It sends nothing in a battle (a trainer's defeated flag is only set when the fight ends), before a save is loaded, or while a mon can't be read (the game is rewriting it): in each case try again. Eggs aren't in the snapshot. It is never sent automatically, not even after a play-time jump: you decide when the sheet is reconciled.
-
-Not detected yet: trades (a new party mon with another OT id is only logged).
 
 ## Relay
 
